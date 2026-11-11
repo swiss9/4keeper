@@ -27,7 +27,15 @@ jobs:
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: false
+
+      - name: Accept licenses and install NDK
+        run: |
+          mkdir -p $ANDROID_HOME/licenses
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Install dependencies
         run: npm install

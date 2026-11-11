@@ -21,10 +21,14 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
+
 @CapacitorPlugin(name = "EmbeddedWebView")
 public class EmbeddedWebViewPlugin extends Plugin {
 
     private WebView webView;
+    private boolean webDarkMode = false;
 
     private void ensureWebView() {
         if (webView != null) return;
@@ -47,6 +51,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         ApplicationInfo appInfo = getContext().getApplicationInfo();
         WebView.setWebContentsDebuggingEnabled((appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
+        applyWebDarkMode();
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -125,6 +130,16 @@ public class EmbeddedWebViewPlugin extends Plugin {
             value,
             getContext().getResources().getDisplayMetrics()
         );
+    }
+
+    private void applyWebDarkMode() {
+        if (webView == null) return;
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.getSettings(), webDarkMode);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private static String escapeHtml(String text) {
@@ -223,6 +238,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 if (visible) webView.bringToFront();
             }
         });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setWebDarkMode(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        webDarkMode = enabled;
+        getActivity().runOnUiThread(this::applyWebDarkMode);
         call.resolve();
     }
 

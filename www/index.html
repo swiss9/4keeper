@@ -14,10 +14,11 @@
       theme: {
         extend: {
           colors: {
-            ink: '#09090b',
-            bar: '#18181b',
-            line: '#27272a',
-            muted: '#a1a1aa'
+            ink: 'var(--c-bg)',
+            bar: 'var(--c-surface)',
+            line: 'var(--c-border)',
+            muted: 'var(--c-muted)',
+            fg: 'var(--c-text)'
           },
           fontFamily: {
             sans: ['Inter', 'system-ui', 'sans-serif']
@@ -26,23 +27,53 @@
       }
     }
   </script>
+  <script>
+    (function () {
+      var t = localStorage.getItem('theme');
+      if (t !== 'light' && t !== 'amoled' && t !== 'dark') t = 'dark';
+      document.documentElement.classList.add('theme-' + t);
+    })();
+  </script>
   <style>
+    :root, .theme-dark {
+      --c-bg: #09090b;
+      --c-surface: #18181b;
+      --c-border: #27272a;
+      --c-text: #ffffff;
+      --c-muted: #a1a1aa;
+    }
+    .theme-light {
+      --c-bg: #ffffff;
+      --c-surface: #f4f4f5;
+      --c-border: #e4e4e7;
+      --c-text: #09090b;
+      --c-muted: #71717a;
+    }
+    .theme-amoled {
+      --c-bg: #000000;
+      --c-surface: #0a0a0a;
+      --c-border: #1a1a1a;
+      --c-text: #ffffff;
+      --c-muted: #a1a1aa;
+    }
     html, body { height: 100%; }
     body {
       -webkit-tap-highlight-color: transparent;
       overscroll-behavior: none;
     }
-    input { caret-color: #ffffff; }
-    input::selection { background: #ffffff; color: #09090b; }
+    input { caret-color: var(--c-text); }
+    input::selection { background: var(--c-text); color: var(--c-bg); }
     .spin { animation: spin 700ms linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .tap { transition: opacity 120ms ease, transform 120ms ease, background-color 150ms ease; }
     .tap:active { opacity: 0.6; }
     .menu-open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
     #startScreen { transition: opacity 220ms ease; }
+    #settingsBackdrop { transition: opacity 150ms ease; }
+    #settingsPanel { transition: opacity 150ms ease, transform 150ms ease; }
   </style>
 </head>
-<body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-white antialiased">
+<body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-fg antialiased">
 
   <header class="relative shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
@@ -105,7 +136,7 @@
           "
         />
       </svg>
-      <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white disabled:opacity-40">
+      <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-fg disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
@@ -124,18 +155,18 @@
           autocapitalize="off"
           spellcheck="false"
           placeholder="Search or enter address"
-          class="h-10 w-full min-w-0 bg-transparent text-[14px] font-normal text-white outline-none placeholder:text-muted/80"
+          class="h-10 w-full min-w-0 bg-transparent text-[14px] font-normal text-fg outline-none placeholder:text-muted"
         />
       </div>
 
-      <button id="refreshBtn" aria-label="Refresh" class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white">
+      <button id="refreshBtn" aria-label="Refresh" class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-fg">
         <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12a9 9 0 1 1-3.2-6.9" />
           <path d="M21 3v6h-6" />
         </svg>
       </button>
     </div>
-    <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-white/70 transition-[width] duration-200 ease-out"></div>
+    <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-fg transition-[width] duration-200 ease-out"></div>
   </header>
 
   <main id="browser-container" class="relative min-h-0 flex-1 bg-ink">
@@ -203,7 +234,7 @@
   <div id="menuBackdrop" class="pointer-events-none fixed inset-0 z-30"></div>
 
   <div id="menuPanel" class="fixed bottom-[calc(env(safe-area-inset-bottom)+78px)] right-3 z-40 w-56 origin-bottom-right rounded-2xl border border-line bg-bar p-1.5 opacity-0 shadow-[0_16px_48px_rgba(0,0,0,0.6)] transition-all duration-150 ease-out pointer-events-none scale-95 translate-y-1">
-    <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-white active:bg-line/50">
+    <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
         <path d="M12 3v12" />
         <path d="m7 10 5 5 5-5" />
@@ -212,41 +243,95 @@
       <span class="flex-1">Download</span>
       <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">Phase 2</span>
     </button>
-    <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-white active:bg-line/50">
+    <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
         <path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9Z" />
       </svg>
       <span class="flex-1">Sniff media</span>
       <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">Phase 2</span>
     </button>
+    <button id="settingsBtn" class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
+      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+      </svg>
+      <span class="flex-1">Settings</span>
+    </button>
+  </div>
+
+  <div id="settingsBackdrop" class="pointer-events-none fixed inset-0 z-50 bg-black/70 opacity-0"></div>
+
+  <div id="settingsPanel" class="pointer-events-none fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+12px)] z-[60] max-h-[80dvh] origin-bottom scale-95 overflow-y-auto border border-line bg-bar opacity-0 transition-all duration-150 ease-out sm:inset-x-auto sm:left-1/2 sm:w-[360px] sm:-translate-x-1/2">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+      <h2 class="text-[14px] font-semibold uppercase tracking-wider text-fg">Settings</h2>
+      <button id="settingsCloseBtn" aria-label="Close settings" class="tap grid h-8 w-8 place-items-center border border-line text-muted hover:text-fg">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="border-b border-line px-4 py-3">
+      <label for="searchEngineSelect" class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">Search Engine</label>
+      <select id="searchEngineSelect" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none">
+        <option value="duckduckgo">DuckDuckGo</option>
+        <option value="google">Google</option>
+        <option value="brave">Brave</option>
+        <option value="bing">Bing</option>
+      </select>
+    </div>
+
+    <div class="border-b border-line px-4 py-3">
+      <span class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">App Theme</span>
+      <div id="themeSelector" class="grid grid-cols-3 gap-0 border border-line">
+        <button data-theme="light" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Light</button>
+        <button data-theme="dark" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Dark</button>
+        <button data-theme="amoled" class="tap h-10 text-[13px] font-medium text-fg">AMOLED</button>
+      </div>
+    </div>
+
+    <div class="px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="min-w-0 pr-3">
+          <span class="block text-[14px] font-medium text-fg">Web Dark Mode</span>
+          <span class="block text-[11px] text-muted">Force websites to render in dark mode</span>
+        </div>
+        <label class="relative inline-block shrink-0 cursor-pointer">
+          <input id="webDarkModeToggle" type="checkbox" class="peer sr-only" />
+          <span class="block h-6 w-11 border border-line bg-ink"></span>
+          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+        </label>
+      </div>
+    </div>
   </div>
 
   <footer class="relative shrink-0 border-t border-line bg-bar">
     <div class="grid grid-cols-5 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-1.5">
-      <button id="backNavBtn" aria-label="Back" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-white disabled:opacity-40">
+      <button id="backNavBtn" aria-label="Back" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-fg disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <button id="forwardBtn" aria-label="Forward" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-white disabled:opacity-40">
+      <button id="forwardBtn" aria-label="Forward" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-fg disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="m9 5 7 7-7 7" />
         </svg>
       </button>
-      <button id="homeBtn" aria-label="Home" class="tap flex h-12 items-center justify-center text-muted hover:text-white">
+      <button id="homeBtn" aria-label="Home" class="tap flex h-12 items-center justify-center text-muted hover:text-fg">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="m3 10 9-7 9 7" />
           <path d="M5 9v12h14V9" />
         </svg>
       </button>
-      <button id="tabsBtn" aria-label="Tabs" class="tap relative flex h-12 items-center justify-center text-muted hover:text-white">
+      <button id="tabsBtn" aria-label="Tabs" class="tap relative flex h-12 items-center justify-center text-muted hover:text-fg">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="5" y="3" width="14" height="18" rx="2" />
           <path d="M9 3h6" />
         </svg>
-        <span class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-line px-1 text-[9px] font-semibold leading-none text-white">0</span>
+        <span class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-line px-1 text-[9px] font-semibold leading-none text-fg">0</span>
       </button>
-      <button id="menuBtn" aria-label="Menu" aria-expanded="false" class="tap flex h-12 items-center justify-center text-muted hover:text-white">
+      <button id="menuBtn" aria-label="Menu" aria-expanded="false" class="tap flex h-12 items-center justify-center text-muted hover:text-fg">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="1.8" />
           <circle cx="12" cy="12" r="1.8" />
@@ -268,9 +353,24 @@
     const backBtn = document.getElementById('backBtn');
     const backNavBtn = document.getElementById('backNavBtn');
     const forwardBtn = document.getElementById('forwardBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsBackdrop = document.getElementById('settingsBackdrop');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const settingsCloseBtn = document.getElementById('settingsCloseBtn');
+    const searchEngineSelect = document.getElementById('searchEngineSelect');
+    const themeSelector = document.getElementById('themeSelector');
+    const webDarkModeToggle = document.getElementById('webDarkModeToggle');
+
+    const SEARCH_ENGINES = {
+      duckduckgo: 'https://duckduckgo.com/?q=',
+      google: 'https://www.google.com/search?q=',
+      brave: 'https://search.brave.com/search?q=',
+      bing: 'https://www.bing.com/search?q='
+    };
 
     let hasPage = false;
     let menuOpen = false;
+    let settingsOpen = false;
 
     function getPlugin() {
       return window.Capacitor?.Plugins?.EmbeddedWebView || null;
@@ -303,6 +403,11 @@
       setTimeout(() => { loadBar.style.width = '0'; }, 260);
     }
 
+    function getSearchEngine() {
+      const engine = localStorage.getItem('searchEngine');
+      return SEARCH_ENGINES[engine] ? engine : 'duckduckgo';
+    }
+
     function formatUrl(input) {
       let str = input.trim();
       if (!str) return null;
@@ -315,8 +420,34 @@
         return str;
       }
 
-      // Otherwise, it's a search query. Use DuckDuckGo.
-      return 'https://duckduckgo.com/?q=' + encodeURIComponent(str);
+      // Otherwise, it's a search query using the selected search engine
+      return SEARCH_ENGINES[getSearchEngine()] + encodeURIComponent(str);
+    }
+
+    function applyTheme(theme, persist) {
+      const t = ['dark', 'light', 'amoled'].includes(theme) ? theme : 'dark';
+      document.documentElement.classList.remove('theme-dark', 'theme-light', 'theme-amoled');
+      document.documentElement.classList.add('theme-' + t);
+      if (persist) localStorage.setItem('theme', t);
+      themeSelector.querySelectorAll('button[data-theme]').forEach((btn) => {
+        const active = btn.dataset.theme === t;
+        btn.classList.toggle('bg-line', active);
+        btn.classList.toggle('font-semibold', active);
+      });
+      const styles = getComputedStyle(document.documentElement);
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = styles.getPropertyValue('--c-bg').trim();
+    }
+
+    function isWebDarkMode() {
+      return localStorage.getItem('webDarkMode') === 'on';
+    }
+
+    function setWebDarkMode(enabled, persist) {
+      if (persist) localStorage.setItem('webDarkMode', enabled ? 'on' : 'off');
+      webDarkModeToggle.checked = enabled;
+      const plugin = getPlugin();
+      if (plugin) plugin.setWebDarkMode({ enabled }).catch(() => {});
     }
 
     async function mountWebView() {
@@ -357,6 +488,7 @@
 
       try {
         await mountWebView();
+        await plugin.setWebDarkMode({ enabled: isWebDarkMode() }).catch(() => {});
         await plugin.loadUrl({ url });
         hasPage = true;
         syncNav();
@@ -418,7 +550,44 @@
     menuBtn.addEventListener('click', () => setMenu(!menuOpen));
     menuBackdrop.addEventListener('click', () => setMenu(false));
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') setMenu(false);
+      if (event.key === 'Escape') {
+        if (settingsOpen) setSettings(false);
+        else setMenu(false);
+      }
+    });
+
+    function setSettings(open) {
+      settingsOpen = open;
+      settingsBackdrop.classList.toggle('opacity-0', !open);
+      settingsBackdrop.classList.toggle('pointer-events-auto', open);
+      settingsPanel.classList.toggle('opacity-0', !open);
+      settingsPanel.classList.toggle('scale-95', !open);
+      settingsPanel.classList.toggle('pointer-events-none', !open);
+      if (open) setMenu(false);
+      const plugin = getPlugin();
+      if (plugin && hasPage) {
+        plugin.setVisible({ visible: !open }).catch(() => {});
+      }
+    }
+
+    settingsBtn.addEventListener('click', () => setSettings(true));
+    settingsCloseBtn.addEventListener('click', () => setSettings(false));
+    settingsBackdrop.addEventListener('click', () => setSettings(false));
+
+    searchEngineSelect.value = getSearchEngine();
+    searchEngineSelect.addEventListener('change', () => {
+      localStorage.setItem('searchEngine', searchEngineSelect.value);
+    });
+
+    applyTheme(localStorage.getItem('theme') || 'dark', false);
+    themeSelector.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-theme]');
+      if (btn) applyTheme(btn.dataset.theme, true);
+    });
+
+    webDarkModeToggle.checked = isWebDarkMode();
+    webDarkModeToggle.addEventListener('change', () => {
+      setWebDarkMode(webDarkModeToggle.checked, true);
     });
 
     document.querySelectorAll('#menuPanel button').forEach((item) => {

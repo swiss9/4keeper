@@ -46,10 +46,64 @@
 
   <header class="relative shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
-      <svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" aria-label="4Keeper" class="shrink-0">
-        <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-        <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
-        <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="24"
+        height="24"
+        viewBox="0 0 1254 1254"
+        fill="none"
+        aria-label="4Keeper"
+        class="shrink-0"
+      >
+        <!-- Grey shield outline -->
+        <path
+          fill="#99989E"
+          fill-rule="evenodd"
+          d="
+            M310 227
+            H936
+            V736
+            L623 1004
+            L309 736
+            Z
+
+            M360 273
+            V715
+            L623 939
+            L889 715
+            V273
+            Z
+          "
+        />
+
+        <!-- White number 4 with downward arrow -->
+        <path
+          fill="#FFFFFF"
+          fill-rule="evenodd"
+          d="
+            M619 322
+            L407 550
+            V615
+            H641
+            L642 706
+            H568
+            L680 834
+            L799 707
+            L733 705
+            V617
+            L797 615
+            V557
+            L733 555
+            V323
+            H734
+            Z
+
+            M641 392
+            L642 556
+            L492 557
+            Z
+          "
+        />
       </svg>
       <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -86,10 +140,62 @@
 
   <main id="browser-container" class="relative min-h-0 flex-1 bg-ink">
     <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center">
-      <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
-        <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-        <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
-        <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="80"
+        height="80"
+        viewBox="0 0 1254 1254"
+        fill="none"
+      >
+        <!-- Grey shield outline -->
+        <path
+          fill="#99989E"
+          fill-rule="evenodd"
+          d="
+            M310 227
+            H936
+            V736
+            L623 1004
+            L309 736
+            Z
+
+            M360 273
+            V715
+            L623 939
+            L889 715
+            V273
+            Z
+          "
+        />
+
+        <!-- White number 4 with downward arrow -->
+        <path
+          fill="#FFFFFF"
+          fill-rule="evenodd"
+          d="
+            M619 322
+            L407 550
+            V615
+            H641
+            L642 706
+            H568
+            L680 834
+            L799 707
+            L733 705
+            V617
+            L797 615
+            V557
+            L733 555
+            V323
+            H734
+            Z
+
+            M641 392
+            L642 556
+            L492 557
+            Z
+          "
+        />
       </svg>
     </div>
   </main>
@@ -198,12 +304,19 @@
     }
 
     function formatUrl(input) {
-      const value = input.trim();
-      if (!value) return null;
-      if (/^https?:\/\//i.test(value)) return value;
-      if (/\s/.test(value)) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
-      if (!value.includes('.')) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
-      return `https://${value}`;
+      let str = input.trim();
+      if (!str) return null;
+
+      // If it's a valid URL or contains a dot, prepend https:// if missing
+      if (str.includes('.') || str.startsWith('localhost')) {
+        if (!str.startsWith('http://') && !str.startsWith('https://')) {
+          return 'https://' + str;
+        }
+        return str;
+      }
+
+      // Otherwise, it's a search query. Use DuckDuckGo.
+      return 'https://duckduckgo.com/?q=' + encodeURIComponent(str);
     }
 
     async function mountWebView() {

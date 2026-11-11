@@ -7,10 +7,12 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.util.TypedValue;
 import android.view.View;
+import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
@@ -236,6 +238,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (webView != null) {
                 webView.setVisibility(visible ? View.VISIBLE : View.GONE);
                 if (visible) webView.bringToFront();
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearBrowsingData(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            CookieManager cookieManager = CookieManager.getInstance();
+            cookieManager.removeAllCookies(null);
+            cookieManager.flush();
+            WebStorage.getInstance().deleteAllData();
+            if (webView != null) {
+                webView.clearCache(true);
+                webView.clearHistory();
             }
         });
         call.resolve();

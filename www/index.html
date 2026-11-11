@@ -46,9 +46,12 @@
 
   <header class="relative shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
-      <svg width="24" height="24" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" aria-label="4Keeper" class="shrink-0">
-        <path d="M 12 12 H 68 V 48 L 40 72 L 12 48 Z M 18 18 V 45 L 40 64 L 62 45 V 18 Z" fill="#a1a1aa" fill-rule="evenodd" />
-        <path d="M 44 22 H 52 V 40 H 58 V 46 H 52 V 50 L 58 50 L 48 62 L 38 50 L 44 50 V 46 H 26 V 40 L 44 22 Z M 44 32 L 34 40 H 44 Z" fill="#ffffff" fill-rule="evenodd" />
+      <svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" aria-label="4Keeper" class="shrink-0">
+        <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
+        <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
+        <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
+        <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
+        <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
       </svg>
       <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -85,9 +88,12 @@
 
   <main id="browser-container" class="relative min-h-0 flex-1 bg-ink">
     <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center">
-      <svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-        <path d="M 12 12 H 68 V 48 L 40 72 L 12 48 Z M 18 18 V 45 L 40 64 L 62 45 V 18 Z" fill="#a1a1aa" fill-rule="evenodd" />
-        <path d="M 44 22 H 52 V 40 H 58 V 46 H 52 V 50 L 58 50 L 48 62 L 38 50 L 44 50 V 46 H 26 V 40 L 44 22 Z M 44 32 L 34 40 H 44 Z" fill="#ffffff" fill-rule="evenodd" />
+      <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
+        <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
+        <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
+        <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
+        <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
+        <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
       </svg>
     </div>
   </main>
@@ -195,13 +201,13 @@
       setTimeout(() => { loadBar.style.width = '0'; }, 260);
     }
 
-    function formatUrl(raw) {
-      const value = raw.trim();
+    function formatUrl(input) {
+      const value = input.trim();
       if (!value) return null;
       if (/^https?:\/\//i.test(value)) return value;
-      if (/^[a-z0-9-]+$/i.test(value)) return `https://www.${value}.com`;
-      if (!/\s/.test(value)) return `https://${value}`;
-      return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+      if (/\s/.test(value)) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+      if (value.includes('.')) return `https://${value}`;
+      return `https://www.${value}.com`;
     }
 
     async function mountWebView() {
@@ -356,7 +362,7 @@
       plugin.addListener('pageLoaded', (state) => {
         stopLoading();
         hasPage = true;
-        if (state && state.url) urlInput.value = state.url;
+        if (state && state.url && /^https?:\/\//i.test(state.url)) urlInput.value = state.url;
         startScreen.classList.add('opacity-0', 'pointer-events-none');
         setNav(!!state?.canGoBack, !!state?.canGoForward);
       });

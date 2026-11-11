@@ -85,11 +85,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (!request.isForMainFrame()) return;
+                String failedUrl = request.getUrl().toString();
+                String message = String.valueOf(error.getDescription());
                 JSObject data = new JSObject();
-                data.put("url", request.getUrl().toString());
+                data.put("url", failedUrl);
                 data.put("code", error.getErrorCode());
-                data.put("message", String.valueOf(error.getDescription()));
+                data.put("message", message);
                 notifyListeners("pageError", data);
+                view.loadDataWithBaseURL(null, errorPage(message, failedUrl), "text/html", "utf-8", null);
             }
         });
 
@@ -122,6 +125,30 @@ public class EmbeddedWebViewPlugin extends Plugin {
             value,
             getContext().getResources().getDisplayMetrics()
         );
+    }
+
+    private static String escapeHtml(String text) {
+        if (text == null) return "";
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;");
+    }
+
+    private static String errorPage(String message, String url) {
+        return "<!DOCTYPE html><html><head>"
+            + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            + "<style>"
+            + "html,body{margin:0;height:100%;background:#09090b;color:#a1a1aa;font-family:system-ui,sans-serif;}"
+            + "body{display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:32px;text-align:center;}"
+            + "h1{margin:0 0 10px;font-size:18px;font-weight:600;color:#ffffff;}"
+            + "p{margin:3px 0;font-size:13px;word-break:break-word;}"
+            + "</style></head><body>"
+            + "<h1>Can't open this page</h1>"
+            + "<p>" + escapeHtml(message) + "</p>"
+            + "<p>" + escapeHtml(url) + "</p>"
+            + "</body></html>";
     }
 
     @PluginMethod

@@ -1,18 +1,43 @@
 import sharp from 'sharp';
 
-const svg = `
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1024" height="1024" fill="#09090b" />
-  <svg x="192" y="192" width="640" height="640" viewBox="0 0 80 80">
-    <path d="M 12 12 H 68 V 48 L 40 72 L 12 48 Z M 18 18 V 45 L 40 64 L 62 45 V 18 Z" fill="#a1a1aa" fill-rule="evenodd" />
-    <path d="M 44 22 H 52 V 40 H 58 V 46 H 52 V 50 L 58 50 L 48 62 L 38 50 L 44 50 V 46 H 26 V 40 L 44 22 Z M 44 32 L 34 40 H 44 Z" fill="#ffffff" fill-rule="evenodd" />
-  </svg>
-</svg>
+const SIZE = 1024;
+const SCALE = 0.7;
+const contentSize = Math.round(SIZE * SCALE);
+const offset = Math.round((SIZE - contentSize) / 2);
+
+const logo = `
+    <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
+    <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
+    <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
+    <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
+    <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
 `;
 
-await sharp(Buffer.from(svg))
-  .resize(1024, 1024)
+function paddedSvg(background) {
+  const rect = background ? `<rect width="${SIZE}" height="${SIZE}" fill="${background}" />` : '';
+  return `
+<svg width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}" xmlns="http://www.w3.org/2000/svg">
+  ${rect}
+  <svg x="${offset}" y="${offset}" width="${contentSize}" height="${contentSize}" viewBox="0 0 100 100" fill="none">
+${logo}
+  </svg>
+</svg>`;
+}
+
+await sharp(Buffer.from(paddedSvg('#09090b')))
+  .resize(SIZE, SIZE)
   .png()
   .toFile('assets/icon-only.png');
 
-console.log('Created assets/icon-only.png (1024x1024)');
+await sharp(Buffer.from(paddedSvg(null)))
+  .resize(SIZE, SIZE)
+  .png()
+  .toFile('assets/icon-foreground.png');
+
+await sharp({
+  create: { width: SIZE, height: SIZE, channels: 4, background: '#09090b' }
+})
+  .png()
+  .toFile('assets/icon-background.png');
+
+console.log(`Created padded icons (${Math.round(SCALE * 100)}% safe zone)`);

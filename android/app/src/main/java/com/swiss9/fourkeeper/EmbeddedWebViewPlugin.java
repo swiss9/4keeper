@@ -2,6 +2,7 @@ package com.swiss9.fourkeeper;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.util.TypedValue;
@@ -44,7 +45,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         settings.setSupportMultipleWindows(false);
         settings.setAllowFileAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
+        ApplicationInfo appInfo = getContext().getApplicationInfo();
+        WebView.setWebContentsDebuggingEnabled((appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override

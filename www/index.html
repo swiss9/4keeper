@@ -167,6 +167,10 @@
       </button>
     </div>
     <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-fg transition-[width] duration-200 ease-out"></div>
+
+    <div id="suggestionsDropdown" class="absolute left-0 right-0 top-full z-50 hidden border-b border-line bg-bar shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
+      <div id="suggestionsList" class="max-h-64 overflow-y-auto"></div>
+    </div>
   </header>
 
   <main id="browser-container" class="relative min-h-0 flex-1 bg-ink">
@@ -291,7 +295,7 @@
       </div>
     </div>
 
-    <div class="px-4 py-3">
+    <div class="border-b border-line px-4 py-3">
       <div class="flex items-center justify-between">
         <div class="min-w-0 pr-3">
           <span class="block text-[14px] font-medium text-fg">Web Dark Mode</span>
@@ -303,6 +307,54 @@
           <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
         </label>
       </div>
+    </div>
+
+    <div class="border-b border-line px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="min-w-0 pr-3">
+          <span class="block text-[14px] font-medium text-fg">Search Suggestions</span>
+          <span class="block text-[11px] text-muted">Show query suggestions while typing</span>
+        </div>
+        <label class="relative inline-block shrink-0 cursor-pointer">
+          <input id="searchSuggestionsToggle" type="checkbox" class="peer sr-only" />
+          <span class="block h-6 w-11 border border-line bg-ink"></span>
+          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="border-b border-line px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="min-w-0 pr-3">
+          <span class="block text-[14px] font-medium text-fg">Ad-Blocker</span>
+          <span class="block text-[11px] text-muted">Block ads and trackers (coming soon)</span>
+        </div>
+        <label class="relative inline-block shrink-0 cursor-pointer">
+          <input id="adBlockerToggle" type="checkbox" class="peer sr-only" />
+          <span class="block h-6 w-11 border border-line bg-ink"></span>
+          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="border-b border-line px-4 py-3">
+      <label for="homePageInput" class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">Home Page</label>
+      <input
+        id="homePageInput"
+        type="url"
+        inputmode="url"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        placeholder="https://duckduckgo.com"
+        class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none placeholder:text-muted"
+      />
+    </div>
+
+    <div class="px-4 py-3">
+      <button id="clearDataBtn" class="tap h-11 w-full border border-red-600 text-[13px] font-semibold uppercase tracking-wider text-red-600 hover:bg-red-600/10">
+        Clear History, Cache &amp; Cookies
+      </button>
     </div>
   </div>
 
@@ -360,6 +412,12 @@
     const searchEngineSelect = document.getElementById('searchEngineSelect');
     const themeSelector = document.getElementById('themeSelector');
     const webDarkModeToggle = document.getElementById('webDarkModeToggle');
+    const searchSuggestionsToggle = document.getElementById('searchSuggestionsToggle');
+    const adBlockerToggle = document.getElementById('adBlockerToggle');
+    const homePageInput = document.getElementById('homePageInput');
+    const clearDataBtn = document.getElementById('clearDataBtn');
+    const suggestionsDropdown = document.getElementById('suggestionsDropdown');
+    const suggestionsList = document.getElementById('suggestionsList');
 
     const SEARCH_ENGINES = {
       duckduckgo: 'https://duckduckgo.com/?q=',
@@ -368,9 +426,17 @@
       bing: 'https://www.bing.com/search?q='
     };
 
+    const SUGGEST_APIS = {
+      duckduckgo: (q) => `https://duckduckgo.com/ac/?q=${encodeURIComponent(q)}&type=list`,
+      google: (q) => `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q)}`,
+      brave: (q) => `https://search.brave.com/api/suggest?q=${encodeURIComponent(q)}`
+    };
+
     let hasPage = false;
     let menuOpen = false;
     let settingsOpen = false;
+    let suggestTimer = null;
+    let suggestRequestId = 0;
 
     function getPlugin() {
       return window.Capacitor?.Plugins?.EmbeddedWebView || null;
@@ -450,6 +516,98 @@
       if (plugin) plugin.setWebDarkMode({ enabled }).catch(() => {});
     }
 
+    function isSuggestionsOn() {
+      return localStorage.getItem('searchSuggestions') === 'on';
+    }
+
+    function setSearchSuggestions(enabled, persist) {
+      if (persist) localStorage.setItem('searchSuggestions', enabled ? 'on' : 'off');
+      searchSuggestionsToggle.checked = enabled;
+      if (!enabled) hideSuggestions();
+    }
+
+    function isAdBlockerOn() {
+      return localStorage.getItem('adBlocker') === 'on';
+    }
+
+    function setAdBlocker(enabled, persist) {
+      if (persist) localStorage.setItem('adBlocker', enabled ? 'on' : 'off');
+      adBlockerToggle.checked = enabled;
+    }
+
+    function getHomePage() {
+      const page = (localStorage.getItem('homePage') || '').trim();
+      return page || 'https://duckduckgo.com';
+    }
+
+    function hideSuggestions() {
+      clearTimeout(suggestTimer);
+      suggestTimer = null;
+      suggestRequestId++;
+      suggestionsDropdown.classList.add('hidden');
+      suggestionsList.innerHTML = '';
+    }
+
+    function parseSuggestions(data, engine) {
+      if (engine === 'brave') {
+        if (data && Array.isArray(data.q)) return data.q.filter((x) => typeof x === 'string');
+        if (data && Array.isArray(data.results)) return data.results.map((r) => r.query || r.q).filter(Boolean);
+        return [];
+      }
+      if (Array.isArray(data) && Array.isArray(data[1])) return data[1];
+      if (Array.isArray(data)) return data.map((x) => (typeof x === 'string' ? x : x && x.phrase)).filter(Boolean);
+      return [];
+    }
+
+    async function fetchSuggestions(query) {
+      const engine = getSearchEngine();
+      const endpoint = SUGGEST_APIS[engine];
+      if (!endpoint) { hideSuggestions(); return; }
+
+      const requestId = ++suggestRequestId;
+      try {
+        const response = await fetch(endpoint(query));
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        if (requestId !== suggestRequestId) return;
+        const items = parseSuggestions(data, engine).slice(0, 8);
+        if (!items.length) { hideSuggestions(); return; }
+
+        suggestionsList.innerHTML = '';
+        items.forEach((text) => {
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'tap flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left text-[14px] font-normal text-fg hover:bg-line/40 last:border-b-0';
+          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          icon.setAttribute('viewBox', '0 0 24 24');
+          icon.setAttribute('width', '15');
+          icon.setAttribute('height', '15');
+          icon.setAttribute('fill', 'none');
+          icon.setAttribute('stroke', 'currentColor');
+          icon.setAttribute('stroke-width', '2');
+          icon.setAttribute('stroke-linecap', 'round');
+          icon.setAttribute('stroke-linejoin', 'round');
+          icon.classList.add('shrink-0', 'text-muted');
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M12 3v12m-5-5 5 5 5-5M5 21h14');
+          icon.appendChild(path);
+          const label = document.createElement('span');
+          label.className = 'min-w-0 flex-1 truncate';
+          label.textContent = text;
+          item.appendChild(icon);
+          item.appendChild(label);
+          item.addEventListener('click', () => {
+            hideSuggestions();
+            navigate(text);
+          });
+          suggestionsList.appendChild(item);
+        });
+        suggestionsDropdown.classList.remove('hidden');
+      } catch (error) {
+        if (requestId === suggestRequestId) hideSuggestions();
+      }
+    }
+
     async function mountWebView() {
       const plugin = getPlugin();
       if (!plugin) return;
@@ -471,6 +629,7 @@
     }
 
     async function navigate(raw) {
+      hideSuggestions();
       const url = formatUrl(raw);
       if (!url) return;
 
@@ -521,6 +680,11 @@
     }
 
     async function goHome() {
+      const page = getHomePage();
+      if (page) {
+        await navigate(page);
+        return;
+      }
       const plugin = getPlugin();
       hasPage = false;
       urlInput.value = '';
@@ -590,6 +754,32 @@
       setWebDarkMode(webDarkModeToggle.checked, true);
     });
 
+    searchSuggestionsToggle.checked = isSuggestionsOn();
+    searchSuggestionsToggle.addEventListener('change', () => {
+      setSearchSuggestions(searchSuggestionsToggle.checked, true);
+    });
+
+    adBlockerToggle.checked = isAdBlockerOn();
+    adBlockerToggle.addEventListener('change', () => {
+      setAdBlocker(adBlockerToggle.checked, true);
+    });
+
+    homePageInput.value = getHomePage();
+    homePageInput.addEventListener('change', () => {
+      const page = homePageInput.value.trim();
+      localStorage.setItem('homePage', page || 'https://duckduckgo.com');
+    });
+
+    clearDataBtn.addEventListener('click', async () => {
+      const plugin = getPlugin();
+      if (!plugin) return;
+      try {
+        await plugin.clearBrowsingData();
+      } catch (error) {
+        console.error('Failed to clear browsing data', error);
+      }
+    });
+
     document.querySelectorAll('#menuPanel button').forEach((item) => {
       item.addEventListener('click', () => setMenu(false));
     });
@@ -601,6 +791,20 @@
       }
     });
     urlInput.addEventListener('focus', () => urlInput.select());
+    urlInput.addEventListener('input', () => {
+      const query = urlInput.value.trim();
+      clearTimeout(suggestTimer);
+      if (!isSuggestionsOn() || !query || query.includes('.') || query.startsWith('localhost')) {
+        hideSuggestions();
+        return;
+      }
+      suggestTimer = setTimeout(() => fetchSuggestions(query), 300);
+    });
+    urlInput.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (!urlInput.matches(':focus')) hideSuggestions();
+      }, 150);
+    });
 
     document.getElementById('refreshBtn').addEventListener('click', async () => {
       if (urlInput.value.trim()) {
@@ -629,7 +833,7 @@
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         const plugin = getPlugin();
-        if (plugin && hasPage && !menuOpen) {
+        if (plugin && hasPage && !menuOpen && !settingsOpen) {
           plugin.mount(getBounds()).catch(() => {});
         }
       }, 180);

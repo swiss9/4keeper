@@ -48,10 +48,8 @@
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
       <svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" aria-label="4Keeper" class="shrink-0">
         <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-        <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
-        <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
-        <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
-        <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
+        <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
+        <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
       </svg>
       <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -90,10 +88,8 @@
     <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center">
       <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
         <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-        <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
-        <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
-        <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
-        <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
+        <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
+        <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
       </svg>
     </div>
   </main>
@@ -206,8 +202,8 @@
       if (!value) return null;
       if (/^https?:\/\//i.test(value)) return value;
       if (/\s/.test(value)) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
-      if (value.includes('.')) return `https://${value}`;
-      return `https://www.${value}.com`;
+      if (!value.includes('.')) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+      return `https://${value}`;
     }
 
     async function mountWebView() {

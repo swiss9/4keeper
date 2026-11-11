@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-[#09090b]">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#09090b" />
+  <title>4Keeper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: '#09090b',
+            panel: '#111113',
+            line: '#27272a',
+            muted: '#a1a1aa'
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html, body { height: 100%; }
+    body {
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+    .grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(39, 39, 42, 0.45) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(39, 39, 42, 0.45) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .press { transition: transform 90ms ease, background-color 150ms ease, border-color 150ms ease; }
+    .press:active { transform: translate(2px, 2px); }
+    .spin { animation: spin 700ms linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .blink { animation: blink 1.4s steps(2, start) infinite; }
+    @keyframes blink { to { visibility: hidden; } }
+    .sheet-open { transform: translateY(0); }
+    input { caret-color: #ffffff; }
+    input::selection { background: #ffffff; color: #09090b; }
+  </style>
+</head>
+<body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-white antialiased">
+
+  <header class="shrink-0 border-b border-line bg-ink/95 backdrop-blur">
+    <div class="flex items-center justify-between px-3 pb-2 pt-[calc(env(safe-area-inset-top)+10px)]">
+      <div class="flex items-center gap-2">
+        <span class="h-2 w-2 bg-white"></span>
+        <span class="font-mono text-[10px] font-semibold tracking-[0.28em] text-white">4KEEPER</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="h-1.5 w-1.5 bg-emerald-400 blink"></span>
+        <span class="font-mono text-[9px] tracking-[0.2em] text-muted">SHELL / 01</span>
+      </div>
+    </div>
+
+    <div class="flex items-stretch gap-2 px-3 pb-3">
+      <button id="backBtn" aria-label="Go back" class="press grid h-12 w-12 shrink-0 place-items-center border border-line bg-panel text-white active:bg-line">
+        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="miter">
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+      </button>
+
+      <div class="flex min-w-0 flex-1 items-center border border-line bg-panel transition-colors focus-within:border-white/70">
+        <span class="pl-3 pr-1 font-mono text-[11px] font-medium text-muted">://</span>
+        <input
+          id="urlInput"
+          type="url"
+          inputmode="url"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="paste media link"
+          value="https://"
+          class="h-12 w-full min-w-0 bg-transparent pr-2 font-mono text-[13px] text-white outline-none placeholder:text-muted/60"
+        />
+        <button id="clearBtn" aria-label="Clear URL" class="mr-2 hidden h-7 w-7 shrink-0 place-items-center border border-line text-muted active:bg-line active:text-white">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <button id="refreshBtn" aria-label="Refresh" class="press grid h-12 w-12 shrink-0 place-items-center border border-line bg-panel text-white active:bg-line">
+        <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="miter">
+          <path d="M21 12a9 9 0 1 1-3.2-6.9" />
+          <path d="M21 3v6h-6" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="relative min-h-0 flex-1 overflow-hidden">
+    <div class="absolute inset-0 grid-bg opacity-70"></div>
+    <div class="absolute inset-0 bg-gradient-to-b from-ink/10 via-transparent to-ink"></div>
+
+    <div class="absolute left-3 top-3 z-10 border border-line bg-ink/85 px-2 py-1 font-mono text-[9px] tracking-[0.18em] text-muted">
+      VIEWPORT / 01
+    </div>
+    <div class="absolute right-3 top-3 z-10 flex items-center gap-1.5 border border-line bg-ink/85 px-2 py-1 font-mono text-[9px] tracking-[0.18em] text-muted">
+      <span class="h-1.5 w-1.5 bg-amber-400"></span> NO ENGINE
+    </div>
+
+    <div class="relative z-10 flex h-full flex-col items-center justify-center px-6">
+      <div class="relative w-full max-w-[340px] border border-line bg-panel/70 px-6 py-8 backdrop-blur-sm">
+        <span class="absolute -left-px -top-px h-2.5 w-2.5 border-l-2 border-t-2 border-white"></span>
+        <span class="absolute -right-px -top-px h-2.5 w-2.5 border-r-2 border-t-2 border-white"></span>
+        <span class="absolute -bottom-px -left-px h-2.5 w-2.5 border-b-2 border-l-2 border-white"></span>
+        <span class="absolute -bottom-px -right-px h-2.5 w-2.5 border-b-2 border-r-2 border-white"></span>
+
+        <div class="mx-auto grid h-12 w-12 place-items-center border border-line bg-ink text-muted">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+            <rect x="2" y="4" width="20" height="16" rx="0" />
+            <path d="M2 8h20M6 6h.01M9 6h.01" />
+          </svg>
+        </div>
+
+        <h1 class="mt-5 text-center font-mono text-[15px] font-semibold uppercase tracking-[0.12em] text-white">
+          WebView will load here
+        </h1>
+        <p class="mt-2 text-center font-mono text-[10px] leading-relaxed tracking-[0.1em] text-muted">
+          PHASE 1 — NAVIGATION SHELL<br />NO DOWNLOAD ENGINE ATTACHED
+        </p>
+
+        <div class="mt-6 flex items-center justify-between border-t border-line pt-3 font-mono text-[9px] tracking-[0.16em] text-muted">
+          <span>TARGET / UNKNOWN</span>
+          <span class="text-white">STANDBY</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between px-3 pb-2 font-mono text-[9px] tracking-[0.16em] text-muted/70">
+      <span>SECURE / LOCAL</span>
+      <span>1080 × AUTO</span>
+    </div>
+  </main>
+
+  <footer class="shrink-0 border-t border-line bg-ink px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-3">
+    <div class="flex items-stretch gap-2">
+      <button id="downloadsBtn" aria-label="Open download manager" class="press relative grid h-14 w-14 shrink-0 place-items-center border border-line bg-panel text-white active:bg-line">
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter">
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+        <span id="downloadCount" class="absolute right-1 top-1 grid h-[17px] min-w-[17px] place-items-center bg-white px-1 font-mono text-[9px] font-bold leading-none text-black">0</span>
+      </button>
+
+      <button id="homeBtn" aria-label="Home" class="press grid h-14 w-14 shrink-0 place-items-center border border-line bg-panel text-white active:bg-line">
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter">
+          <path d="m3 10 9-7 9 7" />
+          <path d="M5 9v12h14V9" />
+          <path d="M10 21v-6h4v6" />
+        </svg>
+      </button>
+
+      <button id="sniffBtn" class="press flex h-14 flex-1 items-center justify-center gap-2.5 border-2 border-white bg-white text-black shadow-[4px_4px_0_0_#27272a] active:shadow-none">
+        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter">
+          <path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9Z" />
+        </svg>
+        <span class="text-[17px] font-black uppercase leading-none tracking-tight">Sniff / Download</span>
+      </button>
+    </div>
+
+    <div class="mt-2 grid grid-cols-[3.5rem_3.5rem_1fr] gap-2 font-mono text-[8px] tracking-[0.18em] text-muted">
+      <span class="text-center">MANAGER</span>
+      <span class="text-center">HOME</span>
+      <span class="text-center text-white/60">SNIFFER / READY</span>
+    </div>
+  </footer>
+
+  <div id="backdrop" class="pointer-events-none fixed inset-0 z-40 bg-black/75 opacity-0 backdrop-blur-sm transition-opacity duration-300"></div>
+
+  <section
+    id="downloadSheet"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="sheetTitle"
+    aria-hidden="true"
+    class="fixed inset-x-0 bottom-0 z-50 max-h-[86dvh] translate-y-full overflow-y-auto border-t-2 border-white bg-ink no-scrollbar transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+  >
+    <div class="mx-auto mt-2 h-1 w-10 bg-line"></div>
+
+    <div class="flex items-center justify-between px-4 pb-3 pt-4">
+      <div class="flex items-center gap-2">
+        <span class="h-2 w-2 bg-white"></span>
+        <h2 id="sheetTitle" class="font-mono text-[11px] font-semibold uppercase tracking-[0.24em] text-white">Download menu</h2>
+      </div>
+      <button id="closeSheetBtn" aria-label="Close download menu" class="press grid h-9 w-9 place-items-center border border-line bg-panel text-muted active:text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square">
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="px-4 pb-[calc(env(safe-area-inset-bottom)+18px)]">
+      <div class="mb-4 flex items-center gap-2 border border-line bg-panel px-3 py-2.5">
+        <span class="shrink-0 font-mono text-[9px] tracking-[0.16em] text-muted">SOURCE</span>
+        <span id="sourceUrl" class="min-w-0 truncate font-mono text-[10px] text-white/80">https://</span>
+      </div>
+
+      <div id="formatList" class="flex flex-col gap-2">
+        <button data-format="mp4" class="format-option group flex w-full items-center justify-between border border-line bg-panel p-4 text-left transition-colors active:bg-line/60">
+          <div class="flex items-center gap-3.5">
+            <span class="font-mono text-[10px] text-muted">01</span>
+            <div>
+              <p class="text-[15px] font-black uppercase leading-none tracking-tight text-white">Video</p>
+              <p class="mt-1.5 font-mono text-[9px] tracking-[0.14em] text-muted">MP4 · BEST AVAILABLE · 4K</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="border border-line px-1.5 py-1 font-mono text-[9px] font-semibold tracking-[0.1em] text-muted">MP4</span>
+            <span class="format-check grid h-6 w-6 place-items-center border border-line text-transparent">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square">
+                <path d="m20 6-11 11-5-5" />
+              </svg>
+            </span>
+          </div>
+        </button>
+
+        <button data-format="m4a" class="format-option group flex w-full items-center justify-between border border-line bg-panel p-4 text-left transition-colors active:bg-line/60">
+          <div class="flex items-center gap-3.5">
+            <span class="font-mono text-[10px] text-muted">02</span>
+            <div>
+              <p class="text-[15px] font-black uppercase leading-none tracking-tight text-white">Audio</p>
+              <p class="mt-1.5 font-mono text-[9px] tracking-[0.14em] text-muted">M4A · 128–320 KBPS</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="border border-line px-1.5 py-1 font-mono text-[9px] font-semibold tracking-[0.1em] text-muted">M4A</span>
+            <span class="format-check grid h-6 w-6 place-items-center border border-line text-transparent">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square">
+                <path d="m20 6-11 11-5-5" />
+              </svg>
+            </span>
+          </div>
+        </button>
+      </div>
+
+      <div class="mt-4 border border-line bg-panel p-3.5">
+        <div class="flex items-center justify-between font-mono text-[9px] tracking-[0.16em]">
+          <span class="text-muted">PROGRESS</span>
+          <span id="progressValue" class="text-white">0%</span>
+        </div>
+        <div class="mt-2.5 h-2 w-full border border-line bg-ink p-px">
+          <div id="progressBar" class="h-full w-0 bg-white transition-all duration-300"></div>
+        </div>
+        <div class="mt-2.5 flex items-center justify-between font-mono text-[8px] tracking-[0.14em] text-muted">
+          <span>NO ACTIVE TRANSFER</span>
+          <span>0 B / 0 B</span>
+        </div>
+      </div>
+
+      <button id="startDownloadBtn" disabled class="mt-4 flex h-14 w-full cursor-not-allowed items-center justify-center border border-line bg-line/40 text-muted">
+        <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.22em]">Engine arrives in Phase 2</span>
+      </button>
+    </div>
+  </section>
+
+  <div id="toast" class="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+64px)] z-[60] -translate-x-1/2 -translate-y-2 border border-line bg-panel px-3 py-2 font-mono text-[9px] tracking-[0.16em] text-white opacity-0 transition-all duration-200"></div>
+
+  <script>
+    const backdrop = document.getElementById('backdrop');
+    const sheet = document.getElementById('downloadSheet');
+    const sourceUrl = document.getElementById('sourceUrl');
+    const urlInput = document.getElementById('urlInput');
+    const clearBtn = document.getElementById('clearBtn');
+    const refreshIcon = document.getElementById('refreshIcon');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function toastMessage(message) {
+      toast.textContent = message;
+      toast.classList.remove('opacity-0', '-translate-y-2');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+      }, 1400);
+    }
+
+    function setSheet(open) {
+      sheet.classList.toggle('sheet-open', open);
+      sheet.classList.toggle('translate-y-full', !open);
+      sheet.setAttribute('aria-hidden', String(!open));
+      backdrop.classList.toggle('opacity-0', !open);
+      backdrop.classList.toggle('pointer-events-none', !open);
+      document.body.classList.toggle('overflow-hidden', open);
+      if (open) {
+        sourceUrl.textContent = urlInput.value.trim() || 'https://';
+      }
+    }
+
+    function syncClear() {
+      clearBtn.classList.toggle('hidden', urlInput.value.length === 0);
+      clearBtn.classList.toggle('grid', urlInput.value.length > 0);
+    }
+
+    document.getElementById('sniffBtn').addEventListener('click', () => setSheet(true));
+    document.getElementById('downloadsBtn').addEventListener('click', () => setSheet(true));
+    document.getElementById('closeSheetBtn').addEventListener('click', () => setSheet(false));
+    backdrop.addEventListener('click', () => setSheet(false));
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setSheet(false);
+    });
+
+    urlInput.addEventListener('input', syncClear);
+    clearBtn.addEventListener('click', () => {
+      urlInput.value = 'https://';
+      urlInput.focus();
+      syncClear();
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      refreshIcon.classList.add('spin');
+      toastMessage('RELOADING SHELL…');
+      setTimeout(() => {
+        refreshIcon.classList.remove('spin');
+        toastMessage('VIEWPORT READY');
+      }, 800);
+    });
+
+    document.getElementById('backBtn').addEventListener('click', () => toastMessage('NO BROWSER HISTORY'));
+    document.getElementById('homeBtn').addEventListener('click', () => {
+      urlInput.value = 'https://';
+      syncClear();
+      toastMessage('HOME / NEW SESSION');
+    });
+
+    document.querySelectorAll('.format-option').forEach((option) => {
+      option.addEventListener('click', () => {
+        document.querySelectorAll('.format-option').forEach((item) => {
+          item.classList.remove('border-white', 'bg-white/[0.04]');
+          item.classList.add('border-line');
+          item.querySelector('.format-check').classList.add('border-line', 'text-transparent');
+          item.querySelector('.format-check').classList.remove('border-white', 'bg-white', 'text-black');
+        });
+        option.classList.remove('border-line');
+        option.classList.add('border-white', 'bg-white/[0.04]');
+        const check = option.querySelector('.format-check');
+        check.classList.remove('border-line', 'text-transparent');
+        check.classList.add('border-white', 'bg-white', 'text-black');
+        toastMessage(option.dataset.format === 'mp4' ? 'FORMAT / VIDEO MP4' : 'FORMAT / AUDIO M4A');
+      });
+    });
+
+    syncClear();
+  </script>
+</body>
+</html>

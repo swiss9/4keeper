@@ -39,13 +39,18 @@
     .tap { transition: opacity 120ms ease, transform 120ms ease, background-color 150ms ease; }
     .tap:active { opacity: 0.6; }
     .menu-open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+    #startScreen { transition: opacity 220ms ease; }
   </style>
 </head>
 <body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-white antialiased">
 
-  <header class="shrink-0 border-b border-line bg-bar">
+  <header class="relative shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
-      <button id="backBtn" aria-label="Back" class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white">
+      <svg width="24" height="24" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" aria-label="4Keeper" class="shrink-0">
+        <path d="M 12 12 H 68 V 48 L 40 72 L 12 48 Z M 18 18 V 45 L 40 64 L 62 45 V 18 Z" fill="#a1a1aa" fill-rule="evenodd" />
+        <path d="M 44 22 H 52 V 40 H 58 V 46 H 52 V 50 L 58 50 L 48 62 L 38 50 L 44 50 V 46 H 26 V 40 L 44 22 Z M 44 32 L 34 40 H 44 Z" fill="#ffffff" fill-rule="evenodd" />
+      </svg>
+      <button id="backBtn" aria-label="Back" disabled class="tap grid h-10 w-10 shrink-0 place-items-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
@@ -75,22 +80,15 @@
         </svg>
       </button>
     </div>
+    <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-white/70 transition-[width] duration-200 ease-out"></div>
   </header>
 
-  <main class="relative min-h-0 flex-1 bg-ink">
-    <div class="absolute inset-0 flex flex-col items-center justify-center">
-      <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#3f3f46" stroke-width="1.1" stroke-linecap="round">
-        <path d="M12 21c0-6 0-12 0-18" />
-        <path d="M12 18c-3 0-5-1.5-6.5-3.5" />
-        <path d="M12 18c3 0 5-1.5 6.5-3.5" />
-        <path d="M12 13c-2.2-.2-3.8-1.2-5-2.8" />
-        <path d="M12 13c2.2-.2 3.8-1.2 5-2.8" />
-        <path d="M12 9c-1.6-.2-2.8-.9-3.6-2" />
-        <path d="M12 9c1.6-.2 2.8-.9 3.6-2" />
-        <path d="M12 5.5c-.8-.3-1.4-.8-1.8-1.4" />
-        <path d="M12 5.5c.8-.3 1.4-.8 1.8-1.4" />
+  <main id="browser-container" class="relative min-h-0 flex-1 bg-ink">
+    <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center">
+      <svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 12 12 H 68 V 48 L 40 72 L 12 48 Z M 18 18 V 45 L 40 64 L 62 45 V 18 Z" fill="#a1a1aa" fill-rule="evenodd" />
+        <path d="M 44 22 H 52 V 40 H 58 V 46 H 52 V 50 L 58 50 L 48 62 L 38 50 L 44 50 V 46 H 26 V 40 L 44 22 Z M 44 32 L 34 40 H 44 Z" fill="#ffffff" fill-rule="evenodd" />
       </svg>
-      <p class="mt-4 text-[13px] font-medium tracking-[0.08em] text-muted/60">4Keeper</p>
     </div>
   </main>
 
@@ -117,12 +115,12 @@
 
   <footer class="relative shrink-0 border-t border-line bg-bar">
     <div class="grid grid-cols-5 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-1.5">
-      <button id="backNavBtn" aria-label="Back" class="tap flex h-12 items-center justify-center text-muted hover:text-white">
+      <button id="backNavBtn" aria-label="Back" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <button id="forwardBtn" aria-label="Forward" class="tap flex h-12 items-center justify-center text-muted/40">
+      <button id="forwardBtn" aria-label="Forward" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-white disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="m9 5 7 7-7 7" />
         </svg>
@@ -155,23 +153,232 @@
     const menuPanel = document.getElementById('menuPanel');
     const menuBackdrop = document.getElementById('menuBackdrop');
     const refreshIcon = document.getElementById('refreshIcon');
+    const urlInput = document.getElementById('urlInput');
+    const browserContainer = document.getElementById('browser-container');
+    const startScreen = document.getElementById('startScreen');
+    const loadBar = document.getElementById('loadBar');
+    const backBtn = document.getElementById('backBtn');
+    const backNavBtn = document.getElementById('backNavBtn');
+    const forwardBtn = document.getElementById('forwardBtn');
+
+    let hasPage = false;
+    let menuOpen = false;
+
+    function getPlugin() {
+      return window.Capacitor?.Plugins?.EmbeddedWebView || null;
+    }
+
+    function getBounds() {
+      const rect = browserContainer.getBoundingClientRect();
+      return {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    }
+
+    function setNav(canBack, canForward) {
+      backBtn.disabled = !canBack;
+      backNavBtn.disabled = !canBack;
+      forwardBtn.disabled = !canForward;
+    }
+
+    function startLoading() {
+      refreshIcon.classList.add('spin');
+      loadBar.style.width = '35%';
+    }
+
+    function stopLoading() {
+      refreshIcon.classList.remove('spin');
+      loadBar.style.width = '100%';
+      setTimeout(() => { loadBar.style.width = '0'; }, 260);
+    }
+
+    function formatUrl(raw) {
+      const value = raw.trim();
+      if (!value) return null;
+      if (/^https?:\/\//i.test(value)) return value;
+      if (/^[a-z0-9-]+$/i.test(value)) return `https://www.${value}.com`;
+      if (!/\s/.test(value)) return `https://${value}`;
+      return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+    }
+
+    async function mountWebView() {
+      const plugin = getPlugin();
+      if (!plugin) return;
+      await plugin.mount(getBounds());
+    }
+
+    async function syncNav() {
+      const plugin = getPlugin();
+      if (!plugin) {
+        setNav(false, false);
+        return;
+      }
+      try {
+        const state = await plugin.getNavigationState();
+        setNav(!!state.canGoBack, !!state.canGoForward);
+      } catch (error) {
+        setNav(false, false);
+      }
+    }
+
+    async function navigate(raw) {
+      const url = formatUrl(raw);
+      if (!url) return;
+
+      urlInput.value = url;
+      urlInput.blur();
+      startScreen.classList.add('opacity-0', 'pointer-events-none');
+      startLoading();
+
+      const plugin = getPlugin();
+      if (!plugin) {
+        stopLoading();
+        console.warn('Native WebView is only available inside the Android app.');
+        return;
+      }
+
+      try {
+        await mountWebView();
+        await plugin.loadUrl({ url });
+        hasPage = true;
+        syncNav();
+      } catch (error) {
+        console.error('Failed to load URL', error);
+        stopLoading();
+      }
+    }
+
+    async function goBack() {
+      const plugin = getPlugin();
+      if (!plugin || !hasPage) return;
+      try {
+        await plugin.goBack();
+        setTimeout(syncNav, 350);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function goForward() {
+      const plugin = getPlugin();
+      if (!plugin || !hasPage) return;
+      try {
+        await plugin.goForward();
+        setTimeout(syncNav, 350);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function goHome() {
+      const plugin = getPlugin();
+      hasPage = false;
+      urlInput.value = '';
+      document.title = '4Keeper';
+      startScreen.classList.remove('opacity-0', 'pointer-events-none');
+      setNav(false, false);
+      if (plugin) {
+        try {
+          await plugin.setVisible({ visible: false });
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
 
     function setMenu(open) {
+      menuOpen = open;
       menuPanel.classList.toggle('menu-open', open);
       menuBtn.setAttribute('aria-expanded', String(open));
       menuBackdrop.classList.toggle('pointer-events-auto', open);
+      const plugin = getPlugin();
+      if (plugin && hasPage) {
+        plugin.setVisible({ visible: !open }).catch(() => {});
+      }
     }
 
-    menuBtn.addEventListener('click', () => setMenu(!menuPanel.classList.contains('menu-open')));
+    menuBtn.addEventListener('click', () => setMenu(!menuOpen));
     menuBackdrop.addEventListener('click', () => setMenu(false));
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') setMenu(false);
     });
 
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-      refreshIcon.classList.add('spin');
-      setTimeout(() => refreshIcon.classList.remove('spin'), 700);
+    document.querySelectorAll('#menuPanel button').forEach((item) => {
+      item.addEventListener('click', () => setMenu(false));
     });
+
+    urlInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        navigate(urlInput.value);
+      }
+    });
+    urlInput.addEventListener('focus', () => urlInput.select());
+
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      if (urlInput.value.trim()) {
+        navigate(urlInput.value);
+        return;
+      }
+      const plugin = getPlugin();
+      if (plugin && hasPage) {
+        startLoading();
+        try {
+          await plugin.reload();
+        } catch (error) {
+          console.error(error);
+          stopLoading();
+        }
+      }
+    });
+
+    backBtn.addEventListener('click', goBack);
+    backNavBtn.addEventListener('click', goBack);
+    forwardBtn.addEventListener('click', goForward);
+    document.getElementById('homeBtn').addEventListener('click', goHome);
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const plugin = getPlugin();
+        if (plugin && hasPage && !menuOpen) {
+          plugin.mount(getBounds()).catch(() => {});
+        }
+      }, 180);
+    });
+
+    const plugin = getPlugin();
+    if (plugin) {
+      plugin.addListener('pageLoaded', (state) => {
+        stopLoading();
+        hasPage = true;
+        if (state && state.url) urlInput.value = state.url;
+        startScreen.classList.add('opacity-0', 'pointer-events-none');
+        setNav(!!state?.canGoBack, !!state?.canGoForward);
+      });
+
+      plugin.addListener('pageStarted', () => startLoading());
+
+      plugin.addListener('loadProgress', (state) => {
+        if (!state || typeof state.progress !== 'number') return;
+        loadBar.style.width = `${Math.min(100, Math.max(5, state.progress))}%`;
+      });
+
+      plugin.addListener('titleChanged', (state) => {
+        if (state && state.title) document.title = state.title;
+      });
+
+      plugin.addListener('pageError', (state) => {
+        stopLoading();
+        console.error('Page error', state);
+      });
+    }
+
+    syncNav();
   </script>
 </body>
 </html>

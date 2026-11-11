@@ -1,14 +1,57 @@
 import sharp from 'sharp';
 
 const SIZE = 1024;
-const SCALE = 0.7;
+const SCALE = 0.65;
 const contentSize = Math.round(SIZE * SCALE);
 const offset = Math.round((SIZE - contentSize) / 2);
 
 const logo = `
-    <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-    <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
-    <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
+    <path
+      fill="#99989E"
+      fill-rule="evenodd"
+      d="
+        M310 227
+        H936
+        V736
+        L623 1004
+        L309 736
+        Z
+
+        M360 273
+        V715
+        L623 939
+        L889 715
+        V273
+        Z
+      "
+    />
+    <path
+      fill="#FFFFFF"
+      fill-rule="evenodd"
+      d="
+        M619 322
+        L407 550
+        V615
+        H641
+        L642 706
+        H568
+        L680 834
+        L799 707
+        L733 705
+        V617
+        L797 615
+        V557
+        L733 555
+        V323
+        H734
+        Z
+
+        M641 392
+        L642 556
+        L492 557
+        Z
+      "
+    />
 `;
 
 function paddedSvg(background) {
@@ -16,7 +59,7 @@ function paddedSvg(background) {
   return `
 <svg width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}" xmlns="http://www.w3.org/2000/svg">
   ${rect}
-  <svg x="${offset}" y="${offset}" width="${contentSize}" height="${contentSize}" viewBox="0 0 100 100" fill="none">
+  <svg x="${offset}" y="${offset}" width="${contentSize}" height="${contentSize}" viewBox="0 0 1254 1254" fill="none">
 ${logo}
   </svg>
 </svg>`;

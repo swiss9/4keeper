@@ -7,10 +7,8 @@ const offset = Math.round((SIZE - contentSize) / 2);
 
 const logo = `
     <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" stroke="#ffffff" stroke-width="6" fill="#09090b"/>
-    <rect x="30" y="30" width="30" height="10" fill="#ffffff"/>
-    <rect x="45" y="30" width="10" height="20" fill="#ffffff"/>
-    <rect x="45" y="45" width="10" height="15" fill="#ffffff"/>
-    <polygon points="30,55 50,80 70,55" fill="#ffffff"/>
+    <rect x="30" y="30" width="25" height="10" fill="#ffffff"/>
+    <polygon points="55,40 55,55 65,55 50,80 35,55 45,55 45,30 55,30" fill="#ffffff"/>
 `;
 
 function paddedSvg(background) {

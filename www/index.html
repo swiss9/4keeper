@@ -142,8 +142,8 @@
         </svg>
       </button>
 
-      <div class="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-ink px-3">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted">
+      <div class="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-[#27272a] px-5 py-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-[#a1a1aa]">
           <rect x="5" y="11" width="14" height="10" rx="2" />
           <path d="M8 11V7a4 4 0 0 1 8 0v4" />
         </svg>
@@ -155,7 +155,7 @@
           autocapitalize="off"
           spellcheck="false"
           placeholder="Search or enter address"
-          class="h-10 w-full min-w-0 bg-transparent text-[14px] font-normal text-fg outline-none placeholder:text-muted"
+          class="h-6 w-full min-w-0 bg-transparent text-[14px] font-normal text-fg outline-none placeholder:text-[#a1a1aa]"
         />
       </div>
 
@@ -442,6 +442,16 @@
       return window.Capacitor?.Plugins?.EmbeddedWebView || null;
     }
 
+    function syncWebViewVisibility() {
+      const plugin = getPlugin();
+      if (!plugin) return;
+      const visible = hasPage && !menuOpen && !settingsOpen;
+      const setVisibility = typeof plugin.setWebViewVisibility === 'function'
+        ? plugin.setWebViewVisibility.bind(plugin)
+        : plugin.setVisible.bind(plugin);
+      setVisibility({ visible }).catch(() => {});
+    }
+
     function getBounds() {
       const rect = browserContainer.getBoundingClientRect();
       return {
@@ -633,7 +643,6 @@
       const url = formatUrl(raw);
       if (!url) return;
 
-      urlInput.value = url;
       urlInput.blur();
       startScreen.classList.add('opacity-0', 'pointer-events-none');
       startLoading();
@@ -693,7 +702,7 @@
       setNav(false, false);
       if (plugin) {
         try {
-          await plugin.setVisible({ visible: false });
+          await plugin.setWebViewVisibility({ visible: false });
         } catch (error) {
           console.error(error);
         }
@@ -705,10 +714,7 @@
       menuPanel.classList.toggle('menu-open', open);
       menuBtn.setAttribute('aria-expanded', String(open));
       menuBackdrop.classList.toggle('pointer-events-auto', open);
-      const plugin = getPlugin();
-      if (plugin && hasPage) {
-        plugin.setVisible({ visible: !open }).catch(() => {});
-      }
+      syncWebViewVisibility();
     }
 
     menuBtn.addEventListener('click', () => setMenu(!menuOpen));
@@ -728,10 +734,7 @@
       settingsPanel.classList.toggle('scale-95', !open);
       settingsPanel.classList.toggle('pointer-events-none', !open);
       if (open) setMenu(false);
-      const plugin = getPlugin();
-      if (plugin && hasPage) {
-        plugin.setVisible({ visible: !open }).catch(() => {});
-      }
+      syncWebViewVisibility();
     }
 
     settingsBtn.addEventListener('click', () => setSettings(true));
@@ -790,7 +793,12 @@
         navigate(urlInput.value);
       }
     });
-    urlInput.addEventListener('focus', () => urlInput.select());
+    urlInput.addEventListener('focus', () => {
+      requestAnimationFrame(() => {
+        urlInput.select();
+        urlInput.setSelectionRange(0, urlInput.value.length);
+      });
+    });
     urlInput.addEventListener('input', () => {
       const query = urlInput.value.trim();
       clearTimeout(suggestTimer);
@@ -847,6 +855,7 @@
         if (state && state.url && /^https?:\/\//i.test(state.url)) urlInput.value = state.url;
         startScreen.classList.add('opacity-0', 'pointer-events-none');
         setNav(!!state?.canGoBack, !!state?.canGoForward);
+        syncWebViewVisibility();
       });
 
       plugin.addListener('pageStarted', () => startLoading());

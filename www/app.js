@@ -30,6 +30,7 @@ const newTabBtn = document.getElementById('newTabBtn');
 const tabsCount = document.getElementById('tabsCount');
 const tabTitleEl = document.getElementById('tabTitle');
 const tabUrlEl = document.getElementById('tabUrl');
+const tabsList = document.getElementById('tabsList');
 
 const SEARCH_ENGINES = {
   duckduckgo: 'https://duckduckgo.com/?q=',
@@ -53,6 +54,8 @@ let suggestRequestId = 0;
 let typedQuery = null;
 let typedSearchUrl = null;
 let lastTitle = '';
+const bootActiveTab = parseInt(localStorage.getItem('activeTabId') || '', 10);
+let activeTabId = Number.isNaN(bootActiveTab) ? null : bootActiveTab;
 
 function getPlugin() {
   return window.Capacitor?.Plugins?.EmbeddedWebView || null;
@@ -127,9 +130,7 @@ function applyTheme(theme, persist) {
   document.documentElement.classList.add('theme-' + t);
   if (persist) localStorage.setItem('theme', t);
   themeSelector.querySelectorAll('button[data-theme]').forEach((btn) => {
-    const active = btn.dataset.theme === t;
-    btn.classList.toggle('bg-line', active);
-    btn.classList.toggle('font-semibold', active);
+    btn.classList.toggle('theme-active', btn.dataset.theme === t);
   });
   const styles = getComputedStyle(document.documentElement);
   const meta = document.querySelector('meta[name="theme-color"]');
@@ -174,7 +175,7 @@ function setAdBlocker(enabled, persist) {
 
 function getHomePage() {
   const page = (localStorage.getItem('homePage') || '').trim();
-  return page || 'https://duckduckgo.com';
+  return page || 'https://www.google.com';
 }
 
 function getHistory() {
@@ -192,6 +193,37 @@ function addToHistory(url) {
   history.push(url);
   if (history.length > 200) history.splice(0, history.length - 200);
   localStorage.setItem('history', JSON.stringify(history));
+}
+
+function getOpenTabs() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('openTabs') || '[]');
+    return Array.isArray(parsed) ? parsed.filter((t) => t && Number.isFinite(t.id)) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveOpenTabs(tabs) {
+  localStorage.setItem('openTabs', JSON.stringify(tabs));
+}
+
+function getActiveTab() {
+  return getOpenTabs().find((t) => t.id === activeTabId) || null;
+}
+
+function setActiveTab(id) {
+  activeTabId = id;
+  localStorage.setItem('activeTabId', String(id));
+}
+
+function clearActiveTab() {
+  activeTabId = null;
+  localStorage.removeItem('activeTabId');
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function hideSuggestions() {
@@ -287,6 +319,17 @@ async function navigate(raw) {
   const url = formatUrl(raw);
   if (!url) return;
 
+  const tabs = getOpenTabs();
+  let tab = tabs.find((t) => t.id === activeTabId);
+  if (!tab) {
+    tab = { id: Date.now(), url: '', title: '' };
+    tabs.push(tab);
+    setActiveTab(tab.id);
+  }
+  tab.url = url;
+  saveOpenTabs(tabs);
+  updateTabsUi();
+
   urlInput.blur();
   startScreen.classList.add('opacity-0', 'pointer-events-none');
   startLoading();
@@ -365,14 +408,102 @@ menuBtn.addEventListener('click', () => setMenu(!menuOpen));
 menuBackdrop.addEventListener('click', () => setMenu(false));
 
 function updateTabsUi() {
-  const count = hasPage ? 1 : 0;
-  if (tabsCount) tabsCount.textContent = String(count);
+  const tabs = getOpenTabs();
+  if (tabsCount) tabsCount.textContent = String(tabs.length);
+  const tab = getActiveTab();
   if (tabTitleEl) {
-    tabTitleEl.textContent = hasPage ? (lastTitle || 'Current tab') : 'New tab';
+    tabTitleEl.textContent = tab ? (tab.title || (hasPage ? 'Current tab' : 'New tab')) : 'New tab';
   }
   if (tabUrlEl) {
-    tabUrlEl.textContent = hasPage ? (urlInput.value || getHomePage()) : getHomePage();
+    tabUrlEl.textContent = tab ? (tab.url || getHomePage()) : getHomePage();
   }
+}
+
+function renderTabs() {
+  if (!tabsList) return;
+  const tabs = getOpenTabs();
+  tabsList.innerHTML = '';
+  if (!tabs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'border border-line bg-ink px-3 py-4 text-center font-mono text-[11px] uppercase tracking-wider text-muted';
+    empty.textContent = '// No open tabs';
+    tabsList.appendChild(empty);
+    return;
+  }
+  tabs.forEach((tab) => {
+    const active = tab.id === activeTabId;
+    const row = document.createElement('div');
+    row.className = active
+      ? 'tap flex items-center gap-3 border border-line border-l-4 border-l-accent bg-ink px-3 py-3'
+      : 'tap flex items-center gap-3 border border-line bg-ink px-3 py-3';
+    row.innerHTML = `
+      <div class="grid h-9 w-9 shrink-0 place-items-center border border-line bg-bar text-muted">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21M12 3c-2.5 2.6-3.8 5.7-3.8 9s1.3 6.4 3.8 9" />
+        </svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-[14px] font-medium ${active ? 'text-accent' : 'text-fg'}">${escapeHtml(tab.title || 'Untitled')}</div>
+        <div class="truncate text-[11px] text-muted">${escapeHtml(tab.url || '')}</div>
+      </div>
+      ${active ? '<span class="h-2 w-2 shrink-0 bg-accent" aria-label="Active tab"></span>' : ''}
+      <button class="close-tab tap grid h-8 w-8 shrink-0 place-items-center border border-line text-muted hover:text-red-500" aria-label="Close tab">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </button>
+    `;
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('.close-tab')) return;
+      switchTab(tab.id);
+    });
+    row.querySelector('.close-tab').addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeTab(tab.id);
+    });
+    tabsList.appendChild(row);
+  });
+}
+
+async function switchTab(id) {
+  const tabs = getOpenTabs();
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab) return;
+  setActiveTab(id);
+  setTabs(false);
+  lastTitle = tab.title || '';
+  urlInput.value = tab.url || '';
+  await navigate(tab.url || getHomePage());
+}
+
+async function closeTab(id) {
+  const tabs = getOpenTabs();
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx === -1) return;
+  tabs.splice(idx, 1);
+  saveOpenTabs(tabs);
+  if (id === activeTabId) {
+    clearActiveTab();
+    lastTitle = '';
+    if (tabs.length) {
+      await switchTab(tabs[Math.min(idx, tabs.length - 1)].id);
+    } else {
+      await newTab();
+    }
+  } else {
+    updateTabsUi();
+    renderTabs();
+  }
+}
+
+async function newTab() {
+  setTabs(false);
+  clearActiveTab();
+  lastTitle = '';
+  urlInput.value = '';
+  await navigate(getHomePage());
 }
 
 function setTabs(open) {
@@ -383,6 +514,7 @@ function setTabs(open) {
   if (open) {
     setMenu(false);
     setSettings(false);
+    renderTabs();
     updateTabsUi();
   }
   syncWebViewVisibility();
@@ -391,12 +523,7 @@ function setTabs(open) {
 tabsBtn.addEventListener('click', () => setTabs(!tabsOpen));
 tabsBackdrop.addEventListener('click', () => setTabs(false));
 tabsCloseBtn.addEventListener('click', () => setTabs(false));
-newTabBtn.addEventListener('click', () => {
-  setTabs(false);
-  urlInput.value = '';
-  lastTitle = '';
-  goHome();
-});
+newTabBtn.addEventListener('click', () => newTab());
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
@@ -449,7 +576,7 @@ adBlockerToggle.addEventListener('change', () => {
 homePageInput.value = getHomePage();
 function persistHomePage() {
   const page = homePageInput.value.trim();
-  localStorage.setItem('homePage', page || 'https://duckduckgo.com');
+  localStorage.setItem('homePage', page || 'https://www.google.com');
 }
 homePageInput.addEventListener('change', persistHomePage);
 homePageInput.addEventListener('blur', persistHomePage);
@@ -542,6 +669,13 @@ function attachPluginListeners() {
     stopLoading();
     hasPage = true;
     if (state && state.title) lastTitle = state.title;
+    const tabs = getOpenTabs();
+    const tab = tabs.find((t) => t.id === activeTabId);
+    if (tab) {
+      if (state && state.title) tab.title = state.title;
+      if (state && state.url && /^https?:\/\//i.test(state.url)) tab.url = state.url;
+      saveOpenTabs(tabs);
+    }
     if (state && state.url && /^https?:\/\//i.test(state.url) && document.activeElement !== urlInput) {
       if (typedSearchUrl && typedQuery && state.url === typedSearchUrl) {
         urlInput.value = typedQuery;
@@ -570,6 +704,12 @@ function attachPluginListeners() {
     if (state && state.title) {
       lastTitle = state.title;
       document.title = state.title;
+      const tabs = getOpenTabs();
+      const tab = tabs.find((t) => t.id === activeTabId);
+      if (tab) {
+        tab.title = state.title;
+        saveOpenTabs(tabs);
+      }
       updateTabsUi();
     }
   });

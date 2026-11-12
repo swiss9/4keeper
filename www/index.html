@@ -18,7 +18,8 @@
             bar: 'var(--c-surface)',
             line: 'var(--c-border)',
             muted: 'var(--c-muted)',
-            fg: 'var(--c-text)'
+            fg: 'var(--c-text)',
+            accent: 'var(--c-accent)'
           },
           fontFamily: {
             sans: ['Inter', 'system-ui', 'sans-serif']
@@ -41,6 +42,7 @@
       --c-border: #27272a;
       --c-text: #ffffff;
       --c-muted: #a1a1aa;
+      --c-accent: #00FF41;
     }
     .theme-light {
       --c-bg: #ffffff;
@@ -48,6 +50,7 @@
       --c-border: #e4e4e7;
       --c-text: #09090b;
       --c-muted: #71717a;
+      --c-accent: #00c335;
     }
     .theme-amoled {
       --c-bg: #000000;
@@ -55,6 +58,7 @@
       --c-border: #1a1a1a;
       --c-text: #ffffff;
       --c-muted: #a1a1aa;
+      --c-accent: #00FF41;
     }
     html, body { height: 100%; }
     body {
@@ -75,6 +79,13 @@
     #startScreen { transition: opacity 220ms ease; }
     #settings-view { display: none; }
     #settings-view.settings-open { display: flex; }
+    .theme-active {
+      border-left: 3px solid var(--c-accent) !important;
+      color: var(--c-accent) !important;
+      font-weight: 600;
+      background: rgba(0, 255, 65, 0.08);
+      box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 12px rgba(0, 255, 65, 0.08);
+    }
     #tabsPanel { transition: transform 200ms ease; }
     #tabsPanel.tabs-open { transform: translateY(0) !important; }
   </style>
@@ -150,7 +161,7 @@
         </svg>
       </button>
 
-      <div class="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-[#27272a] px-5 py-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2 border-2 border-[#27272a] bg-ink px-3 py-2 transition-colors duration-150 focus-within:border-accent">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-[#a1a1aa]">
           <rect x="5" y="11" width="14" height="10" rx="2" />
           <path d="M8 11V7a4 4 0 0 1 8 0v4" />
@@ -174,7 +185,7 @@
         </svg>
       </button>
     </div>
-    <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-fg transition-[width] duration-200 ease-out"></div>
+    <div id="loadBar" class="absolute bottom-0 left-0 h-[2px] w-0 bg-accent shadow-[0_0_8px_rgba(0,255,65,0.6)] transition-[width] duration-200 ease-out"></div>
 
     <div id="suggestionsDropdown" class="absolute left-0 right-0 top-full z-50 hidden border-b border-line bg-bar shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
       <div id="suggestionsList" class="max-h-64 overflow-y-auto"></div>
@@ -252,7 +263,7 @@
         <path d="m7 10 5 5 5-5" />
         <path d="M5 21h14" />
       </svg>
-      <span class="flex-1">Download</span>
+      <span class="flex-1 font-semibold text-accent">Download</span>
       <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">Phase 2</span>
     </button>
     <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
@@ -277,7 +288,7 @@
     <div class="flex items-center justify-between border-b border-line px-4 py-3">
       <h2 class="text-[13px] font-semibold uppercase tracking-wider text-fg">Tabs</h2>
       <div class="flex items-center gap-2">
-        <button id="newTabBtn" aria-label="New tab" class="tap grid h-8 w-8 place-items-center border border-line text-fg">
+        <button id="newTabBtn" aria-label="New tab" class="tap grid h-8 w-8 place-items-center border border-accent text-accent hover:bg-accent/10">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -291,19 +302,7 @@
       </div>
     </div>
     <div class="p-3">
-      <div class="flex items-center gap-3 rounded-xl border border-line bg-ink px-3 py-3">
-        <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-bar text-muted">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21M12 3c-2.5 2.6-3.8 5.7-3.8 9s1.3 6.4 3.8 9" />
-          </svg>
-        </div>
-        <div class="min-w-0 flex-1">
-          <div id="tabTitle" class="truncate text-[14px] font-medium text-fg">New tab</div>
-          <div id="tabUrl" class="truncate text-[11px] text-muted"></div>
-        </div>
-        <span class="h-2 w-2 shrink-0 rounded-full bg-fg" aria-label="Active tab"></span>
-      </div>
+      <div id="tabsList" class="flex flex-col gap-2"></div>
     </div>
   </div>
 
@@ -330,7 +329,7 @@
           <rect x="5" y="3" width="14" height="18" rx="2" />
           <path d="M9 3h6" />
         </svg>
-        <span id="tabsCount" class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-line px-1 text-[9px] font-semibold leading-none text-fg">0</span>
+        <span id="tabsCount" class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center bg-accent px-1 text-[9px] font-semibold leading-none text-[#09090b]">0</span>
       </button>
       <button id="menuBtn" aria-label="Menu" aria-expanded="false" class="tap flex h-12 items-center justify-center text-muted hover:text-fg">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
@@ -352,26 +351,28 @@
         </svg>
         BACK
       </button>
-      <h1 class="flex-1 text-center font-mono text-[13px] font-bold uppercase tracking-[0.25em] text-fg">Settings</h1>
+      <h1 class="flex flex-1 items-center justify-center gap-2 text-center font-mono text-[13px] font-bold uppercase tracking-[0.25em] text-fg">
+        <span class="h-1.5 w-1.5 shrink-0 bg-accent shadow-[0_0_6px_rgba(0,255,65,0.8)]" aria-hidden="true"></span>
+        Settings
+      </h1>
       <div class="h-10 w-[76px] shrink-0" aria-hidden="true"></div>
     </div>
 
     <div>
-
       <div class="border-b border-line bg-bar/70 px-4 py-2">
         <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// GENERAL</span>
       </div>
-      <div class="divide-y divide-line border-b border-line">
-        <div class="px-4 py-3">
+      <div class="grid grid-cols-1 gap-2 border-b border-line p-3 sm:grid-cols-2 sm:gap-3">
+        <div class="border border-line bg-bar/40 p-3">
           <label for="searchEngineSelect" class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">Search Engine</label>
-          <select id="searchEngineSelect" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none">
+          <select id="searchEngineSelect" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none focus:border-accent">
             <option value="duckduckgo">DuckDuckGo</option>
             <option value="google">Google</option>
             <option value="brave">Brave</option>
             <option value="bing">Bing</option>
           </select>
         </div>
-        <div class="px-4 py-3">
+        <div class="border border-line bg-bar/40 p-3">
           <label for="homePageInput" class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">Home Page</label>
           <input
             id="homePageInput"
@@ -380,8 +381,8 @@
             autocomplete="off"
             autocapitalize="off"
             spellcheck="false"
-            placeholder="https://duckduckgo.com"
-            class="h-10 w-full border border-line bg-ink px-3 font-mono text-[13px] font-medium text-fg outline-none placeholder:text-muted"
+            placeholder="https://www.google.com"
+            class="h-10 w-full border border-line bg-ink px-3 font-mono text-[13px] font-medium text-fg outline-none focus:border-accent placeholder:text-muted"
           />
         </div>
       </div>
@@ -389,8 +390,8 @@
       <div class="border-b border-line bg-bar/70 px-4 py-2">
         <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// APPEARANCE</span>
       </div>
-      <div class="divide-y divide-line border-b border-line">
-        <div class="px-4 py-3">
+      <div class="grid grid-cols-1 gap-2 border-b border-line p-3 sm:grid-cols-2 sm:gap-3">
+        <div class="border border-line bg-bar/40 p-3 sm:col-span-2">
           <span class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">App Theme</span>
           <div id="themeSelector" class="grid grid-cols-3 gap-0 border border-line">
             <button data-theme="light" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Light</button>
@@ -398,7 +399,7 @@
             <button data-theme="amoled" class="tap h-10 text-[13px] font-medium text-fg">AMOLED</button>
           </div>
         </div>
-        <div class="flex items-center justify-between px-4 py-3">
+        <div class="flex items-center justify-between border border-line bg-bar/40 p-3 sm:col-span-2">
           <div class="min-w-0 pr-3">
             <span class="block text-[14px] font-medium text-fg">Web Dark Mode</span>
             <span class="block text-[11px] text-muted">Force websites to render in dark mode</span>
@@ -406,7 +407,7 @@
           <label class="relative inline-block shrink-0 cursor-pointer">
             <input id="webDarkModeToggle" type="checkbox" class="peer sr-only" />
             <span class="block h-6 w-11 border border-line bg-ink"></span>
-            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-accent"></span>
           </label>
         </div>
       </div>
@@ -414,8 +415,8 @@
       <div class="border-b border-line bg-bar/70 px-4 py-2">
         <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// PRIVACY &amp; SECURITY</span>
       </div>
-      <div class="divide-y divide-line border-b border-line">
-        <div class="flex items-center justify-between px-4 py-3">
+      <div class="grid grid-cols-1 gap-2 border-b border-line p-3 sm:grid-cols-2 sm:gap-3">
+        <div class="flex items-center justify-between border border-line bg-bar/40 p-3">
           <div class="min-w-0 pr-3">
             <span class="block text-[14px] font-medium text-fg">Ad-Blocker</span>
             <span class="block text-[11px] text-muted">Block ads and trackers (coming soon)</span>
@@ -423,10 +424,10 @@
           <label class="relative inline-block shrink-0 cursor-pointer">
             <input id="adBlockerToggle" type="checkbox" class="peer sr-only" />
             <span class="block h-6 w-11 border border-line bg-ink"></span>
-            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-accent"></span>
           </label>
         </div>
-        <div class="px-4 py-3">
+        <div class="border border-line bg-bar/40 p-3">
           <button id="clearDataBtn" class="tap h-11 w-full border border-red-600 font-mono text-[12px] font-semibold uppercase tracking-wider text-red-600 hover:bg-red-600/10">
             Clear Browsing Data
           </button>
@@ -437,8 +438,8 @@
       <div class="border-b border-line bg-bar/70 px-4 py-2">
         <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// SEARCH</span>
       </div>
-      <div class="border-b border-line">
-        <div class="flex items-center justify-between px-4 py-3">
+      <div class="grid grid-cols-1 gap-2 border-b border-line p-3 sm:grid-cols-2 sm:gap-3">
+        <div class="flex items-center justify-between border border-line bg-bar/40 p-3 sm:col-span-2">
           <div class="min-w-0 pr-3">
             <span class="block text-[14px] font-medium text-fg">Search Suggestions</span>
             <span class="block text-[11px] text-muted">Show query suggestions while typing</span>
@@ -446,7 +447,7 @@
           <label class="relative inline-block shrink-0 cursor-pointer">
             <input id="searchSuggestionsToggle" type="checkbox" class="peer sr-only" />
             <span class="block h-6 w-11 border border-line bg-ink"></span>
-            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-accent"></span>
           </label>
         </div>
       </div>

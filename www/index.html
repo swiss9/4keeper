@@ -81,10 +81,10 @@
         xmlns="http://www.w3.org/2000/svg"
         width="24"
         height="24"
-        viewBox="0 0 1254 1254"
+        viewBox="234 227 777 777"
         fill="none"
         aria-label="4Keeper"
-        class="shrink-0"
+        class="shrink-0 self-center"
       >
         <!-- Grey shield outline -->
         <path
@@ -179,7 +179,7 @@
         xmlns="http://www.w3.org/2000/svg"
         width="80"
         height="80"
-        viewBox="0 0 1254 1254"
+        viewBox="234 227 777 777"
         fill="none"
       >
         <!-- Grey shield outline -->
@@ -442,14 +442,19 @@
       return window.Capacitor?.Plugins?.EmbeddedWebView || null;
     }
 
-    function syncWebViewVisibility() {
+    function setNativeWebViewVisible(visible) {
       const plugin = getPlugin();
       if (!plugin) return;
-      const visible = hasPage && !menuOpen && !settingsOpen;
-      const setVisibility = typeof plugin.setWebViewVisibility === 'function'
-        ? plugin.setWebViewVisibility.bind(plugin)
-        : plugin.setVisible.bind(plugin);
-      setVisibility({ visible }).catch(() => {});
+      const setter = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
+      if (setter) setter.call(plugin, { visible }).catch(() => {});
+    }
+
+    function syncWebViewVisibility() {
+      if (menuOpen || settingsOpen) {
+        setNativeWebViewVisible(false);
+      } else if (hasPage) {
+        setNativeWebViewVisible(true);
+      }
     }
 
     function getBounds() {
@@ -702,7 +707,8 @@
       setNav(false, false);
       if (plugin) {
         try {
-          await plugin.setWebViewVisibility({ visible: false });
+          const setter = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
+          if (setter) await setter.call(plugin, { visible: false });
         } catch (error) {
           console.error(error);
         }
@@ -852,7 +858,9 @@
       plugin.addListener('pageLoaded', (state) => {
         stopLoading();
         hasPage = true;
-        if (state && state.url && /^https?:\/\//i.test(state.url)) urlInput.value = state.url;
+        if (state && state.url && /^https?:\/\//i.test(state.url) && document.activeElement !== urlInput) {
+          urlInput.value = state.url;
+        }
         startScreen.classList.add('opacity-0', 'pointer-events-none');
         setNav(!!state?.canGoBack, !!state?.canGoForward);
         syncWebViewVisibility();

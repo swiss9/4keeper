@@ -73,13 +73,15 @@
       pointer-events: auto !important;
     }
     #startScreen { transition: opacity 220ms ease; }
-    #settingsBackdrop { transition: opacity 150ms ease; }
-    #settingsPanel { transition: opacity 150ms ease, transform 150ms ease; }
+    #settings-view { display: none; }
+    #settings-view.settings-open { display: flex; }
     #tabsPanel { transition: transform 200ms ease; }
     #tabsPanel.tabs-open { transform: translateY(0) !important; }
   </style>
 </head>
-<body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-fg antialiased">
+<body class="h-[100dvh] w-full overflow-hidden bg-ink font-sans text-fg antialiased">
+
+  <div id="main-view" class="flex h-full w-full flex-col overflow-hidden">
 
   <header class="relative shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
@@ -269,101 +271,6 @@
     </button>
   </div>
 
-  <div id="settingsBackdrop" class="pointer-events-none fixed inset-0 z-50 bg-black/70 opacity-0"></div>
-
-  <div id="settingsPanel" class="pointer-events-none fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+12px)] z-[60] max-h-[80dvh] origin-bottom scale-95 overflow-y-auto border border-line bg-bar opacity-0 transition-all duration-150 ease-out sm:inset-x-auto sm:left-1/2 sm:w-[360px] sm:-translate-x-1/2">
-    <div class="flex items-center justify-between border-b border-line px-4 py-3">
-      <h2 class="text-[14px] font-semibold uppercase tracking-wider text-fg">Settings</h2>
-      <button id="settingsCloseBtn" aria-label="Close settings" class="tap grid h-8 w-8 place-items-center border border-line text-muted hover:text-fg">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18" />
-          <path d="m6 6 12 12" />
-        </svg>
-      </button>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <label for="searchEngineSelect" class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">Search Engine</label>
-      <select id="searchEngineSelect" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none">
-        <option value="duckduckgo">DuckDuckGo</option>
-        <option value="google">Google</option>
-        <option value="brave">Brave</option>
-        <option value="bing">Bing</option>
-      </select>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <span class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">App Theme</span>
-      <div id="themeSelector" class="grid grid-cols-3 gap-0 border border-line">
-        <button data-theme="light" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Light</button>
-        <button data-theme="dark" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Dark</button>
-        <button data-theme="amoled" class="tap h-10 text-[13px] font-medium text-fg">AMOLED</button>
-      </div>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <div class="flex items-center justify-between">
-        <div class="min-w-0 pr-3">
-          <span class="block text-[14px] font-medium text-fg">Web Dark Mode</span>
-          <span class="block text-[11px] text-muted">Force websites to render in dark mode</span>
-        </div>
-        <label class="relative inline-block shrink-0 cursor-pointer">
-          <input id="webDarkModeToggle" type="checkbox" class="peer sr-only" />
-          <span class="block h-6 w-11 border border-line bg-ink"></span>
-          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
-        </label>
-      </div>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <div class="flex items-center justify-between">
-        <div class="min-w-0 pr-3">
-          <span class="block text-[14px] font-medium text-fg">Search Suggestions</span>
-          <span class="block text-[11px] text-muted">Show query suggestions while typing</span>
-        </div>
-        <label class="relative inline-block shrink-0 cursor-pointer">
-          <input id="searchSuggestionsToggle" type="checkbox" class="peer sr-only" />
-          <span class="block h-6 w-11 border border-line bg-ink"></span>
-          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
-        </label>
-      </div>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <div class="flex items-center justify-between">
-        <div class="min-w-0 pr-3">
-          <span class="block text-[14px] font-medium text-fg">Ad-Blocker</span>
-          <span class="block text-[11px] text-muted">Block ads and trackers (coming soon)</span>
-        </div>
-        <label class="relative inline-block shrink-0 cursor-pointer">
-          <input id="adBlockerToggle" type="checkbox" class="peer sr-only" />
-          <span class="block h-6 w-11 border border-line bg-ink"></span>
-          <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
-        </label>
-      </div>
-    </div>
-
-    <div class="border-b border-line px-4 py-3">
-      <label for="homePageInput" class="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted">Home Page</label>
-      <input
-        id="homePageInput"
-        type="url"
-        inputmode="url"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        placeholder="https://duckduckgo.com"
-        class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none placeholder:text-muted"
-      />
-    </div>
-
-    <div class="px-4 py-3">
-      <button id="clearDataBtn" class="tap h-11 w-full border border-red-600 text-[13px] font-semibold uppercase tracking-wider text-red-600 hover:bg-red-600/10">
-        Clear History, Cache &amp; Cookies
-      </button>
-    </div>
-  </div>
-
   <div id="tabsBackdrop" class="pointer-events-none fixed inset-0 z-[65] bg-black/60 opacity-0 transition-opacity duration-200"></div>
 
   <div id="tabsPanel" class="fixed inset-x-0 bottom-0 z-[66] max-h-[75dvh] translate-y-full overflow-y-auto rounded-t-2xl border-t border-line bg-bar pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-[0_-16px_48px_rgba(0,0,0,0.6)]">
@@ -434,6 +341,119 @@
       </button>
     </div>
   </footer>
+
+  </div>
+
+  <div id="settings-view" class="h-full w-full flex-col overflow-y-auto bg-ink text-fg">
+    <div class="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-line bg-bar px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
+      <button id="settingsBackBtn" aria-label="Back" class="tap flex h-10 shrink-0 items-center gap-1.5 border border-line px-3 font-mono text-[12px] font-semibold uppercase tracking-wider text-fg hover:bg-line/40">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 19l-7-7 7-7" />
+        </svg>
+        BACK
+      </button>
+      <h1 class="flex-1 text-center font-mono text-[13px] font-bold uppercase tracking-[0.25em] text-fg">Settings</h1>
+      <div class="h-10 w-[76px] shrink-0" aria-hidden="true"></div>
+    </div>
+
+    <div>
+
+      <div class="border-b border-line bg-bar/70 px-4 py-2">
+        <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// GENERAL</span>
+      </div>
+      <div class="divide-y divide-line border-b border-line">
+        <div class="px-4 py-3">
+          <label for="searchEngineSelect" class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">Search Engine</label>
+          <select id="searchEngineSelect" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none">
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="google">Google</option>
+            <option value="brave">Brave</option>
+            <option value="bing">Bing</option>
+          </select>
+        </div>
+        <div class="px-4 py-3">
+          <label for="homePageInput" class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">Home Page</label>
+          <input
+            id="homePageInput"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="https://duckduckgo.com"
+            class="h-10 w-full border border-line bg-ink px-3 font-mono text-[13px] font-medium text-fg outline-none placeholder:text-muted"
+          />
+        </div>
+      </div>
+
+      <div class="border-b border-line bg-bar/70 px-4 py-2">
+        <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// APPEARANCE</span>
+      </div>
+      <div class="divide-y divide-line border-b border-line">
+        <div class="px-4 py-3">
+          <span class="mb-2 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">App Theme</span>
+          <div id="themeSelector" class="grid grid-cols-3 gap-0 border border-line">
+            <button data-theme="light" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Light</button>
+            <button data-theme="dark" class="tap h-10 border-r border-line text-[13px] font-medium text-fg">Dark</button>
+            <button data-theme="amoled" class="tap h-10 text-[13px] font-medium text-fg">AMOLED</button>
+          </div>
+        </div>
+        <div class="flex items-center justify-between px-4 py-3">
+          <div class="min-w-0 pr-3">
+            <span class="block text-[14px] font-medium text-fg">Web Dark Mode</span>
+            <span class="block text-[11px] text-muted">Force websites to render in dark mode</span>
+          </div>
+          <label class="relative inline-block shrink-0 cursor-pointer">
+            <input id="webDarkModeToggle" type="checkbox" class="peer sr-only" />
+            <span class="block h-6 w-11 border border-line bg-ink"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="border-b border-line bg-bar/70 px-4 py-2">
+        <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// PRIVACY &amp; SECURITY</span>
+      </div>
+      <div class="divide-y divide-line border-b border-line">
+        <div class="flex items-center justify-between px-4 py-3">
+          <div class="min-w-0 pr-3">
+            <span class="block text-[14px] font-medium text-fg">Ad-Blocker</span>
+            <span class="block text-[11px] text-muted">Block ads and trackers (coming soon)</span>
+          </div>
+          <label class="relative inline-block shrink-0 cursor-pointer">
+            <input id="adBlockerToggle" type="checkbox" class="peer sr-only" />
+            <span class="block h-6 w-11 border border-line bg-ink"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+          </label>
+        </div>
+        <div class="px-4 py-3">
+          <button id="clearDataBtn" class="tap h-11 w-full border border-red-600 font-mono text-[12px] font-semibold uppercase tracking-wider text-red-600 hover:bg-red-600/10">
+            Clear Browsing Data
+          </button>
+          <span class="mt-2 block text-[11px] text-muted">Removes history, cache, cookies and saved session</span>
+        </div>
+      </div>
+
+      <div class="border-b border-line bg-bar/70 px-4 py-2">
+        <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// SEARCH</span>
+      </div>
+      <div class="border-b border-line">
+        <div class="flex items-center justify-between px-4 py-3">
+          <div class="min-w-0 pr-3">
+            <span class="block text-[14px] font-medium text-fg">Search Suggestions</span>
+            <span class="block text-[11px] text-muted">Show query suggestions while typing</span>
+          </div>
+          <label class="relative inline-block shrink-0 cursor-pointer">
+            <input id="searchSuggestionsToggle" type="checkbox" class="peer sr-only" />
+            <span class="block h-6 w-11 border border-line bg-ink"></span>
+            <span class="pointer-events-none absolute left-[3px] top-[3px] h-4 w-4 bg-muted transition-transform duration-100 peer-checked:translate-x-5 peer-checked:bg-fg"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="h-6"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

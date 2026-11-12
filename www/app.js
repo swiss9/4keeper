@@ -10,9 +10,9 @@ const backBtn = document.getElementById('backBtn');
 const backNavBtn = document.getElementById('backNavBtn');
 const forwardBtn = document.getElementById('forwardBtn');
 const settingsBtn = document.getElementById('settingsBtn');
-const settingsBackdrop = document.getElementById('settingsBackdrop');
-const settingsPanel = document.getElementById('settingsPanel');
-const settingsCloseBtn = document.getElementById('settingsCloseBtn');
+const mainView = document.getElementById('main-view');
+const settingsView = document.getElementById('settings-view');
+const settingsBackBtn = document.getElementById('settingsBackBtn');
 const searchEngineSelect = document.getElementById('searchEngineSelect');
 const themeSelector = document.getElementById('themeSelector');
 const webDarkModeToggle = document.getElementById('webDarkModeToggle');
@@ -381,14 +381,8 @@ function setTabs(open) {
   tabsBackdrop.classList.toggle('opacity-0', !open);
   tabsBackdrop.classList.toggle('pointer-events-auto', open);
   if (open) {
-    menuOpen = false;
-    menuPanel.classList.remove('menu-open');
-    menuBtn.setAttribute('aria-expanded', 'false');
-    menuBackdrop.classList.remove('pointer-events-auto');
-    settingsOpen = false;
-    settingsBackdrop.classList.add('opacity-0');
-    settingsBackdrop.classList.remove('pointer-events-auto');
-    settingsPanel.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+    setMenu(false);
+    setSettings(false);
     updateTabsUi();
   }
   syncWebViewVisibility();
@@ -414,11 +408,8 @@ document.addEventListener('keydown', (event) => {
 
 function setSettings(open) {
   settingsOpen = open;
-  settingsBackdrop.classList.toggle('opacity-0', !open);
-  settingsBackdrop.classList.toggle('pointer-events-auto', open);
-  settingsPanel.classList.toggle('opacity-0', !open);
-  settingsPanel.classList.toggle('scale-95', !open);
-  settingsPanel.classList.toggle('pointer-events-none', !open);
+  mainView.classList.toggle('hidden', open);
+  settingsView.classList.toggle('settings-open', open);
   if (open) {
     setMenu(false);
     setTabs(false);
@@ -427,8 +418,7 @@ function setSettings(open) {
 }
 
 settingsBtn.addEventListener('click', () => setSettings(true));
-settingsCloseBtn.addEventListener('click', () => setSettings(false));
-settingsBackdrop.addEventListener('click', () => setSettings(false));
+settingsBackBtn.addEventListener('click', () => setSettings(false));
 
 searchEngineSelect.value = getSearchEngine();
 searchEngineSelect.addEventListener('change', () => {

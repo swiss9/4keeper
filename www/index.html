@@ -67,7 +67,11 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .tap { transition: opacity 120ms ease, transform 120ms ease, background-color 150ms ease; }
     .tap:active { opacity: 0.6; }
-    .menu-open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+    #menuPanel.menu-open {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      pointer-events: auto !important;
+    }
     #startScreen { transition: opacity 220ms ease; }
     #settingsBackdrop { transition: opacity 150ms ease; }
     #settingsPanel { transition: opacity 150ms ease, transform 150ms ease; }
@@ -437,6 +441,8 @@
     let settingsOpen = false;
     let suggestTimer = null;
     let suggestRequestId = 0;
+    let typedQuery = null;
+    let typedSearchUrl = null;
 
     function getPlugin() {
       return window.Capacitor?.Plugins?.EmbeddedWebView || null;
@@ -652,6 +658,15 @@
       startScreen.classList.add('opacity-0', 'pointer-events-none');
       startLoading();
 
+      const enginePrefix = SEARCH_ENGINES[getSearchEngine()];
+      if (url.startsWith(enginePrefix) && url.length > enginePrefix.length) {
+        typedQuery = decodeURIComponent(url.slice(enginePrefix.length));
+        typedSearchUrl = url;
+      } else {
+        typedQuery = null;
+        typedSearchUrl = null;
+      }
+
       const plugin = getPlugin();
       if (!plugin) {
         stopLoading();
@@ -725,6 +740,26 @@
 
     menuBtn.addEventListener('click', () => setMenu(!menuOpen));
     menuBackdrop.addEventListener('click', () => setMenu(false));
+
+    function showToast(message) {
+      let toast = document.getElementById('appToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'appToast';
+        toast.className = 'pointer-events-none fixed left-1/2 bottom-[calc(env(safe-area-inset-bottom)+92px)] z-[70] -translate-x-1/2 rounded-full border border-line bg-bar px-4 py-2 text-[13px] font-medium text-fg opacity-0 shadow-[0_16px_48px_rgba(0,0,0,0.6)] transition-opacity duration-200';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.classList.remove('opacity-0');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.add('opacity-0'), 1800);
+    }
+
+    const tabsBtn = document.getElementById('tabsBtn');
+    tabsBtn.addEventListener('click', () => {
+      setMenu(false);
+      showToast('Tabs — coming in Phase 2');
+    });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         if (settingsOpen) setSettings(false);
@@ -859,7 +894,15 @@
         stopLoading();
         hasPage = true;
         if (state && state.url && /^https?:\/\//i.test(state.url) && document.activeElement !== urlInput) {
-          urlInput.value = state.url;
+          if (typedSearchUrl && typedQuery && state.url === typedSearchUrl) {
+            urlInput.value = typedQuery;
+          } else {
+            try {
+              urlInput.value = new URL(state.url).hostname.replace(/^www\./, '');
+            } catch (error) {
+              urlInput.value = state.url;
+            }
+          }
         }
         startScreen.classList.add('opacity-0', 'pointer-events-none');
         setNav(!!state?.canGoBack, !!state?.canGoForward);

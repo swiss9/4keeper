@@ -1,8 +1,9 @@
 import sharp from 'sharp';
+import { writeFile } from 'node:fs/promises';
 
 const SIZE = 1024;
 const BACKGROUND = '#09090b';
-const SAFE_ZONE = 0.65;
+const SAFE_ZONE = 0.85;
 const LOGO_SIZE = Math.round(SIZE * SAFE_ZONE);
 
 const logoPaths = `
@@ -86,5 +87,39 @@ await sharp({
 })
   .png()
   .toFile('assets/icon-background.png');
+
+const ANDROID_RES = 'android/app/src/main/res';
+const ADAPTIVE_SIZES = {
+  ldpi: 81,
+  mdpi: 108,
+  hdpi: 162,
+  xhdpi: 216,
+  xxhdpi: 324,
+  xxxhdpi: 432
+};
+
+const foreground = await sharp('assets/icon-foreground.png').toBuffer();
+for (const [density, size] of Object.entries(ADAPTIVE_SIZES)) {
+  const dir = `${ANDROID_RES}/mipmap-${density}`;
+  await sharp(foreground)
+    .resize(size, size)
+    .png()
+    .toFile(`${dir}/ic_launcher_foreground.png`);
+  await sharp({
+    create: { width: size, height: size, channels: 4, background: BACKGROUND }
+  })
+    .png()
+    .toFile(`${dir}/ic_launcher_background.png`);
+}
+
+const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
+`;
+
+await writeFile(`${ANDROID_RES}/mipmap-anydpi-v26/ic_launcher.xml`, adaptiveIconXml);
+await writeFile(`${ANDROID_RES}/mipmap-anydpi-v26/ic_launcher_round.xml`, adaptiveIconXml);
 
 console.log(`Created ${SIZE}x${SIZE} icons on ${BACKGROUND} (${Math.round(SAFE_ZONE * 100)}% safe zone)`);

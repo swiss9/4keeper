@@ -232,6 +232,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setVisibility(PluginCall call) {
+        boolean visible = call.getBoolean("visible", true);
+        getActivity().runOnUiThread(() -> setWebViewVisibility(visible));
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setVisible(PluginCall call) {
         boolean visible = call.getBoolean("visible", true);
         getActivity().runOnUiThread(() -> setWebViewVisibility(visible));

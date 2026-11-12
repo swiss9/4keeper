@@ -39,6 +39,13 @@ const SEARCH_ENGINES = {
   bing: 'https://www.bing.com/search?q='
 };
 
+const ENGINE_HOMEPAGES = {
+  duckduckgo: 'https://duckduckgo.com',
+  google: 'https://www.google.com',
+  brave: 'https://search.brave.com',
+  bing: 'https://www.bing.com'
+};
+
 const SUGGEST_APIS = {
   duckduckgo: (q) => `https://duckduckgo.com/ac/?q=${encodeURIComponent(q)}&type=list`,
   google: (q) => `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q)}`,
@@ -175,7 +182,7 @@ function setAdBlocker(enabled, persist) {
 
 function getHomePage() {
   const page = (localStorage.getItem('homePage') || '').trim();
-  return page || 'https://www.google.com';
+  return page || ENGINE_HOMEPAGES[getSearchEngine()] || 'https://www.google.com';
 }
 
 function getHistory() {
@@ -210,6 +217,15 @@ function saveOpenTabs(tabs) {
 
 function getActiveTab() {
   return getOpenTabs().find((t) => t.id === activeTabId) || null;
+}
+
+let tabIdSeed = parseInt(localStorage.getItem('tabIdSeed') || '', 10);
+if (Number.isNaN(tabIdSeed) || tabIdSeed < Date.now()) tabIdSeed = Date.now();
+
+function nextTabId() {
+  tabIdSeed++;
+  localStorage.setItem('tabIdSeed', String(tabIdSeed));
+  return tabIdSeed;
 }
 
 function setActiveTab(id) {
@@ -322,7 +338,7 @@ async function navigate(raw) {
   const tabs = getOpenTabs();
   let tab = tabs.find((t) => t.id === activeTabId);
   if (!tab) {
-    tab = { id: Date.now(), url: '', title: '' };
+    tab = { id: nextTabId(), url: '', title: '' };
     tabs.push(tab);
     setActiveTab(tab.id);
   }
@@ -549,7 +565,11 @@ settingsBackBtn.addEventListener('click', () => setSettings(false));
 
 searchEngineSelect.value = getSearchEngine();
 searchEngineSelect.addEventListener('change', () => {
-  localStorage.setItem('searchEngine', searchEngineSelect.value);
+  const engine = searchEngineSelect.value;
+  localStorage.setItem('searchEngine', engine);
+  const home = ENGINE_HOMEPAGES[engine] || 'https://www.google.com';
+  localStorage.setItem('homePage', home);
+  homePageInput.value = home;
 });
 
 applyTheme(localStorage.getItem('theme') || 'dark', false);
@@ -576,7 +596,7 @@ adBlockerToggle.addEventListener('change', () => {
 homePageInput.value = getHomePage();
 function persistHomePage() {
   const page = homePageInput.value.trim();
-  localStorage.setItem('homePage', page || 'https://www.google.com');
+  localStorage.setItem('homePage', page || ENGINE_HOMEPAGES[getSearchEngine()] || 'https://www.google.com');
 }
 homePageInput.addEventListener('change', persistHomePage);
 homePageInput.addEventListener('blur', persistHomePage);

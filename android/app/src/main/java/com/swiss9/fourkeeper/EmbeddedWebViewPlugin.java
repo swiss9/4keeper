@@ -283,6 +283,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setDarkMode(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        boolean changed = webDarkMode != enabled;
+        webDarkMode = enabled;
+        getActivity().runOnUiThread(() -> {
+            ensureWebView();
+            applyWebDarkMode();
+            if (changed && webView != null && webView.getUrl() != null) {
+                webView.reload();
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
     public void getNavigationState(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             JSObject result = new JSObject();

@@ -75,6 +75,8 @@
     #startScreen { transition: opacity 220ms ease; }
     #settingsBackdrop { transition: opacity 150ms ease; }
     #settingsPanel { transition: opacity 150ms ease, transform 150ms ease; }
+    #tabsPanel { transition: transform 200ms ease; }
+    #tabsPanel.tabs-open { transform: translateY(0) !important; }
   </style>
 </head>
 <body class="flex h-[100dvh] w-full flex-col overflow-hidden bg-ink font-sans text-fg antialiased">
@@ -362,6 +364,42 @@
     </div>
   </div>
 
+  <div id="tabsBackdrop" class="pointer-events-none fixed inset-0 z-[65] bg-black/60 opacity-0 transition-opacity duration-200"></div>
+
+  <div id="tabsPanel" class="fixed inset-x-0 bottom-0 z-[66] max-h-[75dvh] translate-y-full overflow-y-auto rounded-t-2xl border-t border-line bg-bar pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-[0_-16px_48px_rgba(0,0,0,0.6)]">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+      <h2 class="text-[13px] font-semibold uppercase tracking-wider text-fg">Tabs</h2>
+      <div class="flex items-center gap-2">
+        <button id="newTabBtn" aria-label="New tab" class="tap grid h-8 w-8 place-items-center border border-line text-fg">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        <button id="tabsCloseBtn" aria-label="Close tabs" class="tap grid h-8 w-8 place-items-center border border-line text-muted hover:text-fg">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="p-3">
+      <div class="flex items-center gap-3 rounded-xl border border-line bg-ink px-3 py-3">
+        <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-bar text-muted">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21M12 3c-2.5 2.6-3.8 5.7-3.8 9s1.3 6.4 3.8 9" />
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div id="tabTitle" class="truncate text-[14px] font-medium text-fg">New tab</div>
+          <div id="tabUrl" class="truncate text-[11px] text-muted"></div>
+        </div>
+        <span class="h-2 w-2 shrink-0 rounded-full bg-fg" aria-label="Active tab"></span>
+      </div>
+    </div>
+  </div>
+
   <footer class="relative shrink-0 border-t border-line bg-bar">
     <div class="grid grid-cols-5 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-1.5">
       <button id="backNavBtn" aria-label="Back" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-fg disabled:opacity-40">
@@ -385,7 +423,7 @@
           <rect x="5" y="3" width="14" height="18" rx="2" />
           <path d="M9 3h6" />
         </svg>
-        <span class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-line px-1 text-[9px] font-semibold leading-none text-fg">0</span>
+        <span id="tabsCount" class="absolute right-1.5 top-1.5 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-line px-1 text-[9px] font-semibold leading-none text-fg">0</span>
       </button>
       <button id="menuBtn" aria-label="Menu" aria-expanded="false" class="tap flex h-12 items-center justify-center text-muted hover:text-fg">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
@@ -397,536 +435,6 @@
     </div>
   </footer>
 
-  <script>
-    const menuBtn = document.getElementById('menuBtn');
-    const menuPanel = document.getElementById('menuPanel');
-    const menuBackdrop = document.getElementById('menuBackdrop');
-    const refreshIcon = document.getElementById('refreshIcon');
-    const urlInput = document.getElementById('urlInput');
-    const browserContainer = document.getElementById('browser-container');
-    const startScreen = document.getElementById('startScreen');
-    const loadBar = document.getElementById('loadBar');
-    const backBtn = document.getElementById('backBtn');
-    const backNavBtn = document.getElementById('backNavBtn');
-    const forwardBtn = document.getElementById('forwardBtn');
-    const settingsBtn = document.getElementById('settingsBtn');
-    const settingsBackdrop = document.getElementById('settingsBackdrop');
-    const settingsPanel = document.getElementById('settingsPanel');
-    const settingsCloseBtn = document.getElementById('settingsCloseBtn');
-    const searchEngineSelect = document.getElementById('searchEngineSelect');
-    const themeSelector = document.getElementById('themeSelector');
-    const webDarkModeToggle = document.getElementById('webDarkModeToggle');
-    const searchSuggestionsToggle = document.getElementById('searchSuggestionsToggle');
-    const adBlockerToggle = document.getElementById('adBlockerToggle');
-    const homePageInput = document.getElementById('homePageInput');
-    const clearDataBtn = document.getElementById('clearDataBtn');
-    const suggestionsDropdown = document.getElementById('suggestionsDropdown');
-    const suggestionsList = document.getElementById('suggestionsList');
-
-    const SEARCH_ENGINES = {
-      duckduckgo: 'https://duckduckgo.com/?q=',
-      google: 'https://www.google.com/search?q=',
-      brave: 'https://search.brave.com/search?q=',
-      bing: 'https://www.bing.com/search?q='
-    };
-
-    const SUGGEST_APIS = {
-      duckduckgo: (q) => `https://duckduckgo.com/ac/?q=${encodeURIComponent(q)}&type=list`,
-      google: (q) => `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q)}`,
-      brave: (q) => `https://search.brave.com/api/suggest?q=${encodeURIComponent(q)}`
-    };
-
-    let hasPage = false;
-    let menuOpen = false;
-    let settingsOpen = false;
-    let suggestTimer = null;
-    let suggestRequestId = 0;
-    let typedQuery = null;
-    let typedSearchUrl = null;
-
-    function getPlugin() {
-      return window.Capacitor?.Plugins?.EmbeddedWebView || null;
-    }
-
-    function setNativeWebViewVisible(visible) {
-      const plugin = getPlugin();
-      if (!plugin) return;
-      const setter = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
-      if (setter) setter.call(plugin, { visible }).catch(() => {});
-    }
-
-    function syncWebViewVisibility() {
-      if (menuOpen || settingsOpen) {
-        setNativeWebViewVisible(false);
-      } else if (hasPage) {
-        setNativeWebViewVisible(true);
-      }
-    }
-
-    function getBounds() {
-      const rect = browserContainer.getBoundingClientRect();
-      return {
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height)
-      };
-    }
-
-    function setNav(canBack, canForward) {
-      backBtn.disabled = !canBack;
-      backNavBtn.disabled = !canBack;
-      forwardBtn.disabled = !canForward;
-    }
-
-    function startLoading() {
-      refreshIcon.classList.add('spin');
-      loadBar.style.width = '35%';
-    }
-
-    function stopLoading() {
-      refreshIcon.classList.remove('spin');
-      loadBar.style.width = '100%';
-      setTimeout(() => { loadBar.style.width = '0'; }, 260);
-    }
-
-    function getSearchEngine() {
-      const engine = localStorage.getItem('searchEngine');
-      return SEARCH_ENGINES[engine] ? engine : 'duckduckgo';
-    }
-
-    function formatUrl(input) {
-      let str = input.trim();
-      if (!str) return null;
-
-      // If it's a valid URL or contains a dot, prepend https:// if missing
-      if (str.includes('.') || str.startsWith('localhost')) {
-        if (!str.startsWith('http://') && !str.startsWith('https://')) {
-          return 'https://' + str;
-        }
-        return str;
-      }
-
-      // Otherwise, it's a search query using the selected search engine
-      return SEARCH_ENGINES[getSearchEngine()] + encodeURIComponent(str);
-    }
-
-    function applyTheme(theme, persist) {
-      const t = ['dark', 'light', 'amoled'].includes(theme) ? theme : 'dark';
-      document.documentElement.classList.remove('theme-dark', 'theme-light', 'theme-amoled');
-      document.documentElement.classList.add('theme-' + t);
-      if (persist) localStorage.setItem('theme', t);
-      themeSelector.querySelectorAll('button[data-theme]').forEach((btn) => {
-        const active = btn.dataset.theme === t;
-        btn.classList.toggle('bg-line', active);
-        btn.classList.toggle('font-semibold', active);
-      });
-      const styles = getComputedStyle(document.documentElement);
-      const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.content = styles.getPropertyValue('--c-bg').trim();
-    }
-
-    function isWebDarkMode() {
-      return localStorage.getItem('webDarkMode') === 'on';
-    }
-
-    function setWebDarkMode(enabled, persist) {
-      if (persist) localStorage.setItem('webDarkMode', enabled ? 'on' : 'off');
-      webDarkModeToggle.checked = enabled;
-      const plugin = getPlugin();
-      if (plugin) plugin.setWebDarkMode({ enabled }).catch(() => {});
-    }
-
-    function isSuggestionsOn() {
-      return localStorage.getItem('searchSuggestions') === 'on';
-    }
-
-    function setSearchSuggestions(enabled, persist) {
-      if (persist) localStorage.setItem('searchSuggestions', enabled ? 'on' : 'off');
-      searchSuggestionsToggle.checked = enabled;
-      if (!enabled) hideSuggestions();
-    }
-
-    function isAdBlockerOn() {
-      return localStorage.getItem('adBlocker') === 'on';
-    }
-
-    function setAdBlocker(enabled, persist) {
-      if (persist) localStorage.setItem('adBlocker', enabled ? 'on' : 'off');
-      adBlockerToggle.checked = enabled;
-    }
-
-    function getHomePage() {
-      const page = (localStorage.getItem('homePage') || '').trim();
-      return page || 'https://duckduckgo.com';
-    }
-
-    function hideSuggestions() {
-      clearTimeout(suggestTimer);
-      suggestTimer = null;
-      suggestRequestId++;
-      suggestionsDropdown.classList.add('hidden');
-      suggestionsList.innerHTML = '';
-    }
-
-    function parseSuggestions(data, engine) {
-      if (engine === 'brave') {
-        if (data && Array.isArray(data.q)) return data.q.filter((x) => typeof x === 'string');
-        if (data && Array.isArray(data.results)) return data.results.map((r) => r.query || r.q).filter(Boolean);
-        return [];
-      }
-      if (Array.isArray(data) && Array.isArray(data[1])) return data[1];
-      if (Array.isArray(data)) return data.map((x) => (typeof x === 'string' ? x : x && x.phrase)).filter(Boolean);
-      return [];
-    }
-
-    async function fetchSuggestions(query) {
-      const engine = getSearchEngine();
-      const endpoint = SUGGEST_APIS[engine];
-      if (!endpoint) { hideSuggestions(); return; }
-
-      const requestId = ++suggestRequestId;
-      try {
-        const response = await fetch(endpoint(query));
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        const data = await response.json();
-        if (requestId !== suggestRequestId) return;
-        const items = parseSuggestions(data, engine).slice(0, 8);
-        if (!items.length) { hideSuggestions(); return; }
-
-        suggestionsList.innerHTML = '';
-        items.forEach((text) => {
-          const item = document.createElement('button');
-          item.type = 'button';
-          item.className = 'tap flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left text-[14px] font-normal text-fg hover:bg-line/40 last:border-b-0';
-          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          icon.setAttribute('viewBox', '0 0 24 24');
-          icon.setAttribute('width', '15');
-          icon.setAttribute('height', '15');
-          icon.setAttribute('fill', 'none');
-          icon.setAttribute('stroke', 'currentColor');
-          icon.setAttribute('stroke-width', '2');
-          icon.setAttribute('stroke-linecap', 'round');
-          icon.setAttribute('stroke-linejoin', 'round');
-          icon.classList.add('shrink-0', 'text-muted');
-          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          path.setAttribute('d', 'M12 3v12m-5-5 5 5 5-5M5 21h14');
-          icon.appendChild(path);
-          const label = document.createElement('span');
-          label.className = 'min-w-0 flex-1 truncate';
-          label.textContent = text;
-          item.appendChild(icon);
-          item.appendChild(label);
-          item.addEventListener('click', () => {
-            hideSuggestions();
-            navigate(text);
-          });
-          suggestionsList.appendChild(item);
-        });
-        suggestionsDropdown.classList.remove('hidden');
-      } catch (error) {
-        if (requestId === suggestRequestId) hideSuggestions();
-      }
-    }
-
-    async function mountWebView() {
-      const plugin = getPlugin();
-      if (!plugin) return;
-      await plugin.mount(getBounds());
-    }
-
-    async function syncNav() {
-      const plugin = getPlugin();
-      if (!plugin) {
-        setNav(false, false);
-        return;
-      }
-      try {
-        const state = await plugin.getNavigationState();
-        setNav(!!state.canGoBack, !!state.canGoForward);
-      } catch (error) {
-        setNav(false, false);
-      }
-    }
-
-    async function navigate(raw) {
-      hideSuggestions();
-      const url = formatUrl(raw);
-      if (!url) return;
-
-      urlInput.blur();
-      startScreen.classList.add('opacity-0', 'pointer-events-none');
-      startLoading();
-
-      const enginePrefix = SEARCH_ENGINES[getSearchEngine()];
-      if (url.startsWith(enginePrefix) && url.length > enginePrefix.length) {
-        typedQuery = decodeURIComponent(url.slice(enginePrefix.length));
-        typedSearchUrl = url;
-      } else {
-        typedQuery = null;
-        typedSearchUrl = null;
-      }
-
-      const plugin = getPlugin();
-      if (!plugin) {
-        stopLoading();
-        console.warn('Native WebView is only available inside the Android app.');
-        return;
-      }
-
-      try {
-        await mountWebView();
-        await plugin.setWebDarkMode({ enabled: isWebDarkMode() }).catch(() => {});
-        await plugin.loadUrl({ url });
-        hasPage = true;
-        syncNav();
-      } catch (error) {
-        console.error('Failed to load URL', error);
-        stopLoading();
-      }
-    }
-
-    async function goBack() {
-      const plugin = getPlugin();
-      if (!plugin || !hasPage) return;
-      try {
-        await plugin.goBack();
-        setTimeout(syncNav, 350);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    async function goForward() {
-      const plugin = getPlugin();
-      if (!plugin || !hasPage) return;
-      try {
-        await plugin.goForward();
-        setTimeout(syncNav, 350);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    async function goHome() {
-      const page = getHomePage();
-      if (page) {
-        await navigate(page);
-        return;
-      }
-      const plugin = getPlugin();
-      hasPage = false;
-      urlInput.value = '';
-      document.title = '4Keeper';
-      startScreen.classList.remove('opacity-0', 'pointer-events-none');
-      setNav(false, false);
-      if (plugin) {
-        try {
-          const setter = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
-          if (setter) await setter.call(plugin, { visible: false });
-        } catch (error) {
-          console.error(error);
-        }
-      }
-    }
-
-    function setMenu(open) {
-      menuOpen = open;
-      menuPanel.classList.toggle('menu-open', open);
-      menuBtn.setAttribute('aria-expanded', String(open));
-      menuBackdrop.classList.toggle('pointer-events-auto', open);
-      syncWebViewVisibility();
-    }
-
-    menuBtn.addEventListener('click', () => setMenu(!menuOpen));
-    menuBackdrop.addEventListener('click', () => setMenu(false));
-
-    function showToast(message) {
-      let toast = document.getElementById('appToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'appToast';
-        toast.className = 'pointer-events-none fixed left-1/2 bottom-[calc(env(safe-area-inset-bottom)+92px)] z-[70] -translate-x-1/2 rounded-full border border-line bg-bar px-4 py-2 text-[13px] font-medium text-fg opacity-0 shadow-[0_16px_48px_rgba(0,0,0,0.6)] transition-opacity duration-200';
-        document.body.appendChild(toast);
-      }
-      toast.textContent = message;
-      toast.classList.remove('opacity-0');
-      clearTimeout(showToast.timer);
-      showToast.timer = setTimeout(() => toast.classList.add('opacity-0'), 1800);
-    }
-
-    const tabsBtn = document.getElementById('tabsBtn');
-    tabsBtn.addEventListener('click', () => {
-      setMenu(false);
-      showToast('Tabs — coming in Phase 2');
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        if (settingsOpen) setSettings(false);
-        else setMenu(false);
-      }
-    });
-
-    function setSettings(open) {
-      settingsOpen = open;
-      settingsBackdrop.classList.toggle('opacity-0', !open);
-      settingsBackdrop.classList.toggle('pointer-events-auto', open);
-      settingsPanel.classList.toggle('opacity-0', !open);
-      settingsPanel.classList.toggle('scale-95', !open);
-      settingsPanel.classList.toggle('pointer-events-none', !open);
-      if (open) setMenu(false);
-      syncWebViewVisibility();
-    }
-
-    settingsBtn.addEventListener('click', () => setSettings(true));
-    settingsCloseBtn.addEventListener('click', () => setSettings(false));
-    settingsBackdrop.addEventListener('click', () => setSettings(false));
-
-    searchEngineSelect.value = getSearchEngine();
-    searchEngineSelect.addEventListener('change', () => {
-      localStorage.setItem('searchEngine', searchEngineSelect.value);
-    });
-
-    applyTheme(localStorage.getItem('theme') || 'dark', false);
-    themeSelector.addEventListener('click', (event) => {
-      const btn = event.target.closest('button[data-theme]');
-      if (btn) applyTheme(btn.dataset.theme, true);
-    });
-
-    webDarkModeToggle.checked = isWebDarkMode();
-    webDarkModeToggle.addEventListener('change', () => {
-      setWebDarkMode(webDarkModeToggle.checked, true);
-    });
-
-    searchSuggestionsToggle.checked = isSuggestionsOn();
-    searchSuggestionsToggle.addEventListener('change', () => {
-      setSearchSuggestions(searchSuggestionsToggle.checked, true);
-    });
-
-    adBlockerToggle.checked = isAdBlockerOn();
-    adBlockerToggle.addEventListener('change', () => {
-      setAdBlocker(adBlockerToggle.checked, true);
-    });
-
-    homePageInput.value = getHomePage();
-    homePageInput.addEventListener('change', () => {
-      const page = homePageInput.value.trim();
-      localStorage.setItem('homePage', page || 'https://duckduckgo.com');
-    });
-
-    clearDataBtn.addEventListener('click', async () => {
-      const plugin = getPlugin();
-      if (!plugin) return;
-      try {
-        await plugin.clearBrowsingData();
-      } catch (error) {
-        console.error('Failed to clear browsing data', error);
-      }
-    });
-
-    document.querySelectorAll('#menuPanel button').forEach((item) => {
-      item.addEventListener('click', () => setMenu(false));
-    });
-
-    urlInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        navigate(urlInput.value);
-      }
-    });
-    urlInput.addEventListener('focus', () => {
-      requestAnimationFrame(() => {
-        urlInput.select();
-        urlInput.setSelectionRange(0, urlInput.value.length);
-      });
-    });
-    urlInput.addEventListener('input', () => {
-      const query = urlInput.value.trim();
-      clearTimeout(suggestTimer);
-      if (!isSuggestionsOn() || !query || query.includes('.') || query.startsWith('localhost')) {
-        hideSuggestions();
-        return;
-      }
-      suggestTimer = setTimeout(() => fetchSuggestions(query), 300);
-    });
-    urlInput.addEventListener('blur', () => {
-      setTimeout(() => {
-        if (!urlInput.matches(':focus')) hideSuggestions();
-      }, 150);
-    });
-
-    document.getElementById('refreshBtn').addEventListener('click', async () => {
-      if (urlInput.value.trim()) {
-        navigate(urlInput.value);
-        return;
-      }
-      const plugin = getPlugin();
-      if (plugin && hasPage) {
-        startLoading();
-        try {
-          await plugin.reload();
-        } catch (error) {
-          console.error(error);
-          stopLoading();
-        }
-      }
-    });
-
-    backBtn.addEventListener('click', goBack);
-    backNavBtn.addEventListener('click', goBack);
-    forwardBtn.addEventListener('click', goForward);
-    document.getElementById('homeBtn').addEventListener('click', goHome);
-
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        const plugin = getPlugin();
-        if (plugin && hasPage && !menuOpen && !settingsOpen) {
-          plugin.mount(getBounds()).catch(() => {});
-        }
-      }, 180);
-    });
-
-    const plugin = getPlugin();
-    if (plugin) {
-      plugin.addListener('pageLoaded', (state) => {
-        stopLoading();
-        hasPage = true;
-        if (state && state.url && /^https?:\/\//i.test(state.url) && document.activeElement !== urlInput) {
-          if (typedSearchUrl && typedQuery && state.url === typedSearchUrl) {
-            urlInput.value = typedQuery;
-          } else {
-            try {
-              urlInput.value = new URL(state.url).hostname.replace(/^www\./, '');
-            } catch (error) {
-              urlInput.value = state.url;
-            }
-          }
-        }
-        startScreen.classList.add('opacity-0', 'pointer-events-none');
-        setNav(!!state?.canGoBack, !!state?.canGoForward);
-        syncWebViewVisibility();
-      });
-
-      plugin.addListener('pageStarted', () => startLoading());
-
-      plugin.addListener('loadProgress', (state) => {
-        if (!state || typeof state.progress !== 'number') return;
-        loadBar.style.width = `${Math.min(100, Math.max(5, state.progress))}%`;
-      });
-
-      plugin.addListener('titleChanged', (state) => {
-        if (state && state.title) document.title = state.title;
-      });
-
-      plugin.addListener('pageError', (state) => {
-        stopLoading();
-        console.error('Page error', state);
-      });
-    }
-
-    syncNav();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

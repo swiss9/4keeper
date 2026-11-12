@@ -434,7 +434,7 @@ function renderTabs() {
     const active = tab.id === activeTabId;
     const row = document.createElement('div');
     row.className = active
-      ? 'tap flex items-center gap-3 border border-line border-l-4 border-l-accent bg-ink px-3 py-3'
+      ? 'tap flex items-center gap-3 border border-line border-l-4 border-l-fg bg-ink px-3 py-3'
       : 'tap flex items-center gap-3 border border-line bg-ink px-3 py-3';
     row.innerHTML = `
       <div class="grid h-9 w-9 shrink-0 place-items-center border border-line bg-bar text-muted">
@@ -444,10 +444,10 @@ function renderTabs() {
         </svg>
       </div>
       <div class="min-w-0 flex-1">
-        <div class="truncate text-[14px] font-medium ${active ? 'text-accent' : 'text-fg'}">${escapeHtml(tab.title || 'Untitled')}</div>
+        <div class="truncate text-[14px] font-medium text-fg">${escapeHtml(tab.title || 'Untitled')}</div>
         <div class="truncate text-[11px] text-muted">${escapeHtml(tab.url || '')}</div>
       </div>
-      ${active ? '<span class="h-2 w-2 shrink-0 bg-accent" aria-label="Active tab"></span>' : ''}
+      ${active ? '<span class="h-2 w-2 shrink-0 bg-fg" aria-label="Active tab"></span>' : ''}
       <button class="close-tab tap grid h-8 w-8 shrink-0 place-items-center border border-line text-muted hover:text-red-500" aria-label="Close tab">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 6 6 18" />

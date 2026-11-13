@@ -24,6 +24,19 @@ const homePageInput = document.getElementById('homePageInput');
 const clearDataBtn = document.getElementById('clearDataBtn');
 const suggestionsDropdown = document.getElementById('suggestions-dropdown');
 const suggestionsList = document.getElementById('suggestionsList');
+const historyView = document.getElementById('history-view');
+const historyBackBtn = document.getElementById('historyBackBtn');
+const historyMenuBtn = document.getElementById('historyMenuBtn');
+const historyList = document.getElementById('history-list');
+const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+const clearDataBackdrop = document.getElementById('clearDataBackdrop');
+const clearDataModal = document.getElementById('clearDataModal');
+const clearDataCancel = document.getElementById('clearDataCancel');
+const clearDataDelete = document.getElementById('clearDataDelete');
+const clearHistoryCheck = document.getElementById('clearHistoryCheck');
+const clearCookiesCheck = document.getElementById('clearCookiesCheck');
+const clearCacheCheck = document.getElementById('clearCacheCheck');
+const clearDataRange = document.getElementById('clearDataRange');
 const tabsBtn = document.getElementById('tabsBtn');
 const tabsBackdrop = document.getElementById('tabsBackdrop');
 const tabsPanel = document.getElementById('tabsPanel');
@@ -57,6 +70,7 @@ const SUGGEST_APIS = {
 let hasPage = false;
 let menuOpen = false;
 let settingsOpen = false;
+let historyOpen = false;
 let tabsOpen = false;
 let suggestTimer = null;
 let suggestRequestId = 0;
@@ -78,7 +92,7 @@ function setNativeWebViewVisible(visible) {
 }
 
 function syncWebViewVisibility() {
-  if (menuOpen || settingsOpen || tabsOpen) {
+  if (menuOpen || settingsOpen || tabsOpen || historyOpen) {
     setNativeWebViewVisible(false);
   } else if (hasPage) {
     setNativeWebViewVisible(true);
@@ -187,21 +201,45 @@ function getHomePage() {
   return page || ENGINE_HOMEPAGES[getSearchEngine()] || 'https://www.google.com';
 }
 
-function getHistory() {
+function getBrowserHistory() {
   try {
-    const parsed = JSON.parse(localStorage.getItem('history') || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(localStorage.getItem('browserHistory') || '[]');
+    return Array.isArray(parsed) ? parsed.filter((h) => h && Number.isFinite(h.id) && typeof h.url === 'string') : [];
   } catch (error) {
     return [];
   }
 }
 
-function addToHistory(url) {
-  const history = getHistory();
-  if (history[history.length - 1] === url) return;
-  history.push(url);
-  if (history.length > 200) history.splice(0, history.length - 200);
-  localStorage.setItem('history', JSON.stringify(history));
+function saveBrowserHistory(list) {
+  localStorage.setItem('browserHistory', JSON.stringify(list.slice(-500)));
+}
+
+let historyIdSeed = parseInt(localStorage.getItem('historyIdSeed') || '', 10);
+if (Number.isNaN(historyIdSeed) || historyIdSeed < Date.now()) historyIdSeed = Date.now();
+
+function nextHistoryId() {
+  historyIdSeed++;
+  localStorage.setItem('historyIdSeed', String(historyIdSeed));
+  return historyIdSeed;
+}
+
+function addBrowserHistory(url, title) {
+  if (!/^https?:\/\//i.test(url)) return;
+  const history = getBrowserHistory();
+  const last = history[history.length - 1];
+  if (last && last.url === url) {
+    last.title = title || last.title;
+    last.timestamp = Date.now();
+    saveBrowserHistory(history);
+    return;
+  }
+  history.push({ id: nextHistoryId(), url, title: title || '', timestamp: Date.now() });
+  saveBrowserHistory(history);
+}
+
+function removeBrowserHistoryItem(id) {
+  saveBrowserHistory(getBrowserHistory().filter((h) => h.id !== id));
+  if (historyOpen) renderHistory();
 }
 
 function getOpenTabs() {
@@ -353,7 +391,6 @@ async function navigate(raw) {
   startLoading();
 
   localStorage.setItem('lastUrl', url);
-  addToHistory(url);
 
   const enginePrefix = SEARCH_ENGINES[getSearchEngine()];
   if (url.startsWith(enginePrefix) && url.length > enginePrefix.length) {
@@ -415,6 +452,10 @@ async function handleHardwareBack({ canGoBack } = {}) {
     setSettings(false);
     return;
   }
+  if (historyOpen) {
+    setHistory(false);
+    return;
+  }
   if (tabsOpen) {
     setTabs(false);
     return;
@@ -455,6 +496,7 @@ function setMenu(open) {
   if (open) {
     setTabs(false);
     setSettings(false);
+    setHistory(false);
   }
   syncWebViewVisibility();
 }
@@ -569,6 +611,7 @@ function setTabs(open) {
   if (open) {
     setMenu(false);
     setSettings(false);
+    setHistory(false);
     renderTabs();
     updateTabsUi();
   }
@@ -584,6 +627,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (tabsOpen) setTabs(false);
     else if (settingsOpen) setSettings(false);
+    else if (historyOpen) setHistory(false);
     else setMenu(false);
   }
 });
@@ -595,12 +639,155 @@ function setSettings(open) {
   if (open) {
     setMenu(false);
     setTabs(false);
+    setHistory(false);
   }
   syncWebViewVisibility();
 }
 
 settingsBtn.addEventListener('click', () => setSettings(true));
 settingsBackBtn.addEventListener('click', () => setSettings(false));
+
+function historyDayKey(timestamp) {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function historyDayLabel(timestamp) {
+  const now = new Date();
+  const d = new Date(timestamp);
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (timestamp >= startToday) return 'Today';
+  if (timestamp >= startToday - 86400000) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+function renderHistory() {
+  if (!historyList) return;
+  const history = getBrowserHistory().slice().reverse();
+  historyList.innerHTML = '';
+
+  if (!history.length) {
+    const empty = document.createElement('div');
+    empty.className = 'border border-line bg-bar/40 px-3 py-6 text-center font-mono text-[11px] uppercase tracking-[0.2em] text-muted';
+    empty.textContent = '// No history yet';
+    historyList.appendChild(empty);
+    return;
+  }
+
+  let currentKey = null;
+  let currentLabel = null;
+
+  history.forEach((item) => {
+    const key = historyDayKey(item.timestamp);
+    if (key !== currentKey) {
+      currentKey = key;
+      currentLabel = historyDayLabel(item.timestamp);
+      const header = document.createElement('div');
+      header.className = 'border-b border-line bg-bar/70 px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted';
+      header.textContent = currentLabel;
+      historyList.appendChild(header);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'tap flex items-center gap-3 border-b border-line px-4 py-3 hover:bg-line/40 last:border-b-0';
+    row.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 self-center text-muted">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21M12 3c-2.5 2.6-3.8 5.7-3.8 9s1.3 6.4 3.8 9" />
+      </svg>
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-[14px] font-medium text-fg">${escapeHtml(item.title || item.url)}</div>
+        <div class="truncate text-[11px] text-muted">${escapeHtml(item.url)}</div>
+      </div>
+      <span class="shrink-0 font-mono text-[10px] uppercase text-muted">${escapeHtml(new Date(item.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }))}</span>
+      <button class="delete-history tap grid h-8 w-8 shrink-0 place-items-center border border-line text-muted hover:border-red-600 hover:text-red-600" aria-label="Delete entry">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </button>
+    `;
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('.delete-history')) return;
+      setHistory(false);
+      navigate(item.url);
+    });
+    row.querySelector('.delete-history').addEventListener('click', (event) => {
+      event.stopPropagation();
+      removeBrowserHistoryItem(item.id);
+    });
+    historyList.appendChild(row);
+  });
+}
+
+function setHistory(open) {
+  historyOpen = open;
+  historyView.classList.toggle('history-open', open);
+  if (open) {
+    setMenu(false);
+    setTabs(false);
+    setSettings(false);
+    renderHistory();
+  }
+  syncWebViewVisibility();
+}
+
+historyMenuBtn.addEventListener('click', () => setHistory(true));
+historyBackBtn.addEventListener('click', () => setHistory(false));
+clearHistoryBtn.addEventListener('click', () => setClearDataModal(true));
+
+function setClearDataModal(open) {
+  clearDataModal.classList.toggle('modal-open', open);
+  clearDataBackdrop.classList.toggle('opacity-0', !open);
+  clearDataBackdrop.classList.toggle('pointer-events-auto', open);
+}
+
+function clearDataSinceMs(range) {
+  const now = Date.now();
+  if (range === '15m') return now - 15 * 60 * 1000;
+  if (range === '1h') return now - 60 * 60 * 1000;
+  if (range === '24h') return now - 24 * 60 * 60 * 1000;
+  return 0;
+}
+
+clearDataCancel.addEventListener('click', () => setClearDataModal(false));
+clearDataBackdrop.addEventListener('click', () => setClearDataModal(false));
+
+clearDataDelete.addEventListener('click', async () => {
+  const since = clearDataSinceMs(clearDataRange.value);
+  const wantsHistory = clearHistoryCheck.checked;
+  const wantsCookies = clearCookiesCheck.checked;
+  const wantsCache = clearCacheCheck.checked;
+
+  if (wantsHistory) {
+    if (since === 0) {
+      localStorage.removeItem('browserHistory');
+      localStorage.removeItem('history');
+    } else {
+      saveBrowserHistory(getBrowserHistory().filter((h) => h.timestamp < since));
+    }
+  }
+
+  const plugin = getPlugin();
+  if ((wantsCookies || wantsCache) && plugin) {
+    try {
+      if (wantsCookies && typeof plugin.clearCookies === 'function') {
+        await plugin.clearCookies();
+      }
+      if (wantsCache && typeof plugin.clearCache === 'function') {
+        await plugin.clearCache();
+      }
+      if (typeof plugin.clearCookies !== 'function' && typeof plugin.clearCache !== 'function') {
+        await plugin.clearBrowsingData();
+      }
+    } catch (error) {
+      console.error('Failed to clear browsing data', error);
+    }
+  }
+
+  setClearDataModal(false);
+  if (historyOpen) renderHistory();
+});
 
 searchEngineSelect.value = getSearchEngine();
 searchEngineSelect.addEventListener('change', () => {
@@ -640,17 +827,7 @@ function persistHomePage() {
 homePageInput.addEventListener('change', persistHomePage);
 homePageInput.addEventListener('blur', persistHomePage);
 
-clearDataBtn.addEventListener('click', async () => {
-  localStorage.removeItem('lastUrl');
-  localStorage.removeItem('history');
-  const plugin = getPlugin();
-  if (!plugin) return;
-  try {
-    await plugin.clearBrowsingData();
-  } catch (error) {
-    console.error('Failed to clear browsing data', error);
-  }
-});
+clearDataBtn.addEventListener('click', () => setClearDataModal(true));
 
 document.querySelectorAll('#menuPanel button').forEach((item) => {
   item.addEventListener('click', () => setMenu(false));
@@ -710,7 +887,7 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     const plugin = getPlugin();
-    if (plugin && hasPage && !menuOpen && !settingsOpen && !tabsOpen) {
+    if (plugin && hasPage && !menuOpen && !settingsOpen && !tabsOpen && !historyOpen) {
       plugin.mount(getBounds()).catch(() => {});
     }
   }, 180);
@@ -728,6 +905,9 @@ function attachPluginListeners() {
     stopLoading();
     hasPage = true;
     if (state && state.title) lastTitle = state.title;
+    if (state && state.url && /^https?:\/\//i.test(state.url)) {
+      addBrowserHistory(state.url, state.title);
+    }
     const tabs = getOpenTabs();
     const tab = tabs.find((t) => t.id === activeTabId);
     if (tab) {

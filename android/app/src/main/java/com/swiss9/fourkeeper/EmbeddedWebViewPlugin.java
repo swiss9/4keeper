@@ -275,6 +275,27 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void clearCookies(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            CookieManager cookieManager = CookieManager.getInstance();
+            cookieManager.removeAllCookies(null);
+            cookieManager.flush();
+            WebStorage.getInstance().deleteAllData();
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearCache(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            if (webView != null) {
+                webView.clearCache(true);
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setWebDarkMode(PluginCall call) {
         boolean enabled = call.getBoolean("enabled", false);
         webDarkMode = enabled;

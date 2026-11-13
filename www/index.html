@@ -82,6 +82,14 @@
     }
     #tabsPanel { transition: transform 200ms ease; }
     #tabsPanel.tabs-open { transform: translateY(0) !important; }
+    #history-view { display: none; }
+    #history-view.history-open { display: flex; }
+    #clearDataModal { transition: transform 150ms ease, opacity 150ms ease; }
+    #clearDataModal.modal-open {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      pointer-events: auto !important;
+    }
   </style>
 </head>
 <body class="h-[100dvh] w-full overflow-hidden bg-ink font-sans text-fg antialiased">
@@ -267,6 +275,14 @@
       <span class="flex-1">Sniff media</span>
       <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">Phase 2</span>
     </button>
+    <button id="historyMenuBtn" class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
+      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+        <path d="M12 7v5l4 2" />
+      </svg>
+      <span class="flex-1">History</span>
+    </button>
     <button id="settingsBtn" class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
         <circle cx="12" cy="12" r="3" />
@@ -447,6 +463,77 @@
       </div>
 
       <div class="h-6"></div>
+    </div>
+  </div>
+
+  <div id="history-view" class="h-full w-full flex-col overflow-y-auto bg-ink text-fg">
+    <div class="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-line bg-bar px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
+      <button id="historyBackBtn" aria-label="Back" class="tap flex h-10 shrink-0 items-center gap-1.5 border border-line px-3 font-mono text-[12px] font-semibold uppercase tracking-wider text-fg hover:bg-line/40">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 19l-7-7 7-7" />
+        </svg>
+        BACK
+      </button>
+      <h1 class="flex flex-1 items-center justify-center gap-2 text-center font-mono text-[13px] font-bold uppercase tracking-[0.25em] text-fg">
+        <span class="h-1.5 w-1.5 shrink-0 bg-fg" aria-hidden="true"></span>
+        History
+      </h1>
+      <div class="h-10 w-[76px] shrink-0" aria-hidden="true"></div>
+    </div>
+
+    <div class="flex items-center justify-between border-b border-line bg-bar/70 px-3 py-2">
+      <span class="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">// BROWSING HISTORY</span>
+      <button id="clearHistoryBtn" class="tap grid h-8 w-8 place-items-center border border-red-600 text-red-600 hover:bg-red-600/10" aria-label="Clear history">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        </svg>
+      </button>
+    </div>
+
+    <div id="history-list" class="flex flex-col"></div>
+
+    <div class="h-6"></div>
+  </div>
+
+  <div id="clearDataBackdrop" class="pointer-events-none fixed inset-0 z-[74] bg-black/70 opacity-0 transition-opacity duration-200"></div>
+
+  <div id="clearDataModal" class="pointer-events-none fixed bottom-0 left-0 right-0 z-[75] translate-y-6 opacity-0">
+    <div class="mx-auto flex max-w-lg flex-col rounded-t-2xl border-t border-line bg-bar p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] shadow-[0_-16px_48px_rgba(0,0,0,0.7)]">
+      <h2 class="mb-1 font-mono text-[13px] font-bold uppercase tracking-[0.2em] text-fg">Delete Browsing Data</h2>
+      <p class="mb-3 text-[11px] text-muted">Select the data you want to remove from this device.</p>
+
+      <div class="flex flex-col gap-2 border-y border-line py-3">
+        <label class="flex cursor-pointer items-center gap-3">
+          <input id="clearHistoryCheck" type="checkbox" class="peer sr-only" checked />
+          <span class="block h-5 w-5 shrink-0 border border-line bg-ink peer-checked:border-fg peer-checked:bg-fg"></span>
+          <span class="min-w-0 flex-1 text-[14px] font-medium text-fg">Browsing History</span>
+        </label>
+        <label class="flex cursor-pointer items-center gap-3">
+          <input id="clearCookiesCheck" type="checkbox" class="peer sr-only" checked />
+          <span class="block h-5 w-5 shrink-0 border border-line bg-ink peer-checked:border-fg peer-checked:bg-fg"></span>
+          <span class="min-w-0 flex-1 text-[14px] font-medium text-fg">Cookies and Site Data</span>
+        </label>
+        <label class="flex cursor-pointer items-center gap-3">
+          <input id="clearCacheCheck" type="checkbox" class="peer sr-only" checked />
+          <span class="block h-5 w-5 shrink-0 border border-line bg-ink peer-checked:border-fg peer-checked:bg-fg"></span>
+          <span class="min-w-0 flex-1 text-[14px] font-medium text-fg">Cached Images and Files</span>
+        </label>
+      </div>
+
+      <label for="clearDataRange" class="mb-2 mt-3 block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted">Time Range</label>
+      <select id="clearDataRange" class="h-10 w-full border border-line bg-ink px-3 text-[14px] font-medium text-fg outline-none focus:border-zinc-600">
+        <option value="15m">Last 15 minutes</option>
+        <option value="1h">Last hour</option>
+        <option value="24h">Last 24 hours</option>
+        <option value="all">All time</option>
+      </select>
+
+      <div class="mt-4 grid grid-cols-2 gap-2">
+        <button id="clearDataCancel" class="tap h-11 border border-line font-mono text-[12px] font-semibold uppercase tracking-wider text-muted hover:text-fg hover:bg-line/40">Cancel</button>
+        <button id="clearDataDelete" class="tap h-11 border border-red-600 font-mono text-[12px] font-semibold uppercase tracking-wider text-red-600 hover:bg-red-600/10">Delete Data</button>
+      </div>
     </div>
   </div>
 

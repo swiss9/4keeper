@@ -861,10 +861,6 @@ urlInput.addEventListener('blur', () => {
 });
 
 document.getElementById('refreshBtn').addEventListener('click', async () => {
-  if (urlInput.value.trim()) {
-    navigate(urlInput.value);
-    return;
-  }
   const plugin = getPlugin();
   if (plugin && hasPage) {
     startLoading();
@@ -920,9 +916,9 @@ function attachPluginListeners() {
         urlInput.value = typedQuery;
       } else {
         try {
-          urlInput.value = new URL(state.url).hostname.replace(/^www\./, '');
+          urlInput.value = new URL(state.url).href.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
         } catch (error) {
-          urlInput.value = state.url;
+          urlInput.value = state.url.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
         }
       }
     }

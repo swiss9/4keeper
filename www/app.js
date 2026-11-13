@@ -1,3 +1,5 @@
+import { App } from '@capacitor/app';
+
 const menuBtn = document.getElementById('menuBtn');
 const menuPanel = document.getElementById('menuPanel');
 const menuBackdrop = document.getElementById('menuBackdrop');
@@ -20,7 +22,7 @@ const searchSuggestionsToggle = document.getElementById('searchSuggestionsToggle
 const adBlockerToggle = document.getElementById('adBlockerToggle');
 const homePageInput = document.getElementById('homePageInput');
 const clearDataBtn = document.getElementById('clearDataBtn');
-const suggestionsDropdown = document.getElementById('suggestionsDropdown');
+const suggestionsDropdown = document.getElementById('suggestions-dropdown');
 const suggestionsList = document.getElementById('suggestionsList');
 const tabsBtn = document.getElementById('tabsBtn');
 const tabsBackdrop = document.getElementById('tabsBackdrop');
@@ -407,6 +409,43 @@ async function goForward() {
 async function goHome() {
   await navigate(getHomePage());
 }
+
+async function handleHardwareBack({ canGoBack } = {}) {
+  if (settingsOpen) {
+    setSettings(false);
+    return;
+  }
+  if (tabsOpen) {
+    setTabs(false);
+    return;
+  }
+  const plugin = getPlugin();
+  let webViewCanGoBack = !!canGoBack;
+  if (plugin && hasPage) {
+    try {
+      const state = await plugin.getNavigationState();
+      if (state && typeof state.canGoBack === 'boolean') webViewCanGoBack = state.canGoBack;
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  if (webViewCanGoBack && plugin) {
+    try {
+      await plugin.goBack();
+      setTimeout(syncNav, 350);
+      return;
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  try {
+    await App.exitApp();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+App.addListener('backButton', handleHardwareBack);
 
 function setMenu(open) {
   menuOpen = open;

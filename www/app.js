@@ -665,14 +665,13 @@ document.addEventListener('keydown', (event) => {
 });
 
 function setSettings(open) {
-  settingsOpen = open;
-  mainView.classList.toggle('hidden', open);
-  settingsView.classList.toggle('settings-open', open);
   if (open) {
     setMenu(false);
     setTabs(false);
     setHistory(false);
   }
+  settingsOpen = open;
+  settingsView.classList.toggle('settings-open', open);
   syncWebViewVisibility();
 }
 

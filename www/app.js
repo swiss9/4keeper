@@ -1,5 +1,10 @@
 import { App } from '@capacitor/app';
 
+window.onerror = function(msg, url, line, col, error) {
+  alert("JS Crash: " + msg + "\nLine: " + line);
+  return false;
+};
+
 const menuBtn = document.getElementById('menuBtn');
 const menuPanel = document.getElementById('menuPanel');
 const menuBackdrop = document.getElementById('menuBackdrop');

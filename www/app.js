@@ -523,6 +523,8 @@ function setMenu(open) {
   menuPanel.classList.toggle('menu-open', open);
   menuBtn.setAttribute('aria-expanded', String(open));
   menuBackdrop.classList.toggle('pointer-events-auto', open);
+  menuBackdrop.classList.toggle('opacity-0', !open);
+  mainView.classList.remove('hidden');
   if (open) {
     setTabs(false);
     setSettings(false);
@@ -881,6 +883,10 @@ urlInput.addEventListener('input', () => {
   if (!isSuggestionsOn() || !query || query.includes('.') || query.startsWith('localhost')) {
     hideSuggestions();
     return;
+  }
+  if (!suggestionsOpen) {
+    suggestionsOpen = true;
+    syncWebViewVisibility();
   }
   suggestTimer = setTimeout(() => fetchSuggestions(query), 300);
 });

@@ -79,6 +79,7 @@ let historyOpen = false;
 let tabsOpen = false;
 let suggestTimer = null;
 let suggestRequestId = 0;
+let suggestionsOpen = false;
 let typedQuery = null;
 let typedSearchUrl = null;
 let lastTitle = '';
@@ -97,7 +98,7 @@ function setNativeWebViewVisible(visible) {
 }
 
 function syncWebViewVisibility() {
-  if (menuOpen || settingsOpen || tabsOpen || historyOpen) {
+  if (menuOpen || settingsOpen || tabsOpen || historyOpen || suggestionsOpen) {
     setNativeWebViewVisible(false);
   } else if (hasPage) {
     setNativeWebViewVisible(true);
@@ -287,12 +288,30 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function formatUrlForDisplay(url) {
+  if (!url) return '';
+  const stripped = String(url).replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  try {
+    const parsed = new URL(url);
+    const isSearchEngine = Object.values(SEARCH_ENGINES).some((prefix) => parsed.href.startsWith(prefix));
+    const query = parsed.searchParams.get('q');
+    if (isSearchEngine && query) return query;
+    return parsed.href.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  } catch (error) {
+    return stripped;
+  }
+}
+
 function hideSuggestions() {
   clearTimeout(suggestTimer);
   suggestTimer = null;
   suggestRequestId++;
   suggestionsDropdown.classList.add('hidden');
   suggestionsList.innerHTML = '';
+  if (suggestionsOpen) {
+    suggestionsOpen = false;
+    syncWebViewVisibility();
+  }
 }
 
 function parseSuggestions(data, engine) {
@@ -350,6 +369,10 @@ async function fetchSuggestions(query) {
       suggestionsList.appendChild(item);
     });
     suggestionsDropdown.classList.remove('hidden');
+    if (!suggestionsOpen) {
+      suggestionsOpen = true;
+      syncWebViewVisibility();
+    }
   } catch (error) {
     if (requestId === suggestRequestId) hideSuggestions();
   }
@@ -578,7 +601,7 @@ async function switchTab(id) {
   setActiveTab(id);
   setTabs(false);
   lastTitle = tab.title || '';
-  urlInput.value = tab.url || '';
+  urlInput.value = formatUrlForDisplay(tab.url || '');
   await navigate(tab.url || getHomePage());
 }
 
@@ -919,15 +942,7 @@ function attachPluginListeners() {
       saveOpenTabs(tabs);
     }
     if (state && state.url && /^https?:\/\//i.test(state.url) && document.activeElement !== urlInput) {
-      if (typedSearchUrl && typedQuery && state.url === typedSearchUrl) {
-        urlInput.value = typedQuery;
-      } else {
-        try {
-          urlInput.value = new URL(state.url).href.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-        } catch (error) {
-          urlInput.value = state.url.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-        }
-      }
+      urlInput.value = formatUrlForDisplay(state.url);
     }
     startScreen.classList.add('opacity-0', 'pointer-events-none');
     setNav(!!state?.canGoBack, !!state?.canGoForward);

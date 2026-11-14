@@ -1,4 +1,4 @@
-import { App } from '@capacitor/app';
+const App = window.Capacitor?.Plugins?.App;
 
 window.onerror = function(msg, url, line, col, error) {
   alert("JS Crash: " + msg + "\nLine: " + line);
@@ -491,7 +491,9 @@ async function handleHardwareBack({ canGoBack } = {}) {
   }
 }
 
-App.addListener('backButton', handleHardwareBack);
+if (App && typeof App.addListener === 'function') {
+  App.addListener('backButton', handleHardwareBack);
+}
 
 function setMenu(open) {
   menuOpen = open;

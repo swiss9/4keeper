@@ -102,7 +102,9 @@
 
   <div id="main-view" class="flex h-full w-full flex-col overflow-hidden bg-[#09090b]">
 
-  <header class="relative shrink-0 border-b border-line bg-bar">
+  <img id="webview-snapshot" alt="" aria-hidden="true" class="absolute inset-0 w-full h-full object-cover z-[40] hidden" />
+
+  <header class="relative z-[45] shrink-0 border-b border-line bg-bar">
     <div class="flex items-center gap-1.5 px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -262,9 +264,9 @@
     </div>
   </main>
 
-  <div id="menuBackdrop" class="pointer-events-none fixed inset-0 z-30 bg-black/60 opacity-0 transition-opacity duration-150"></div>
+  <div id="menuBackdrop" class="pointer-events-none fixed inset-0 z-[50] bg-black/60 opacity-0 transition-opacity duration-150"></div>
 
-  <div id="menuPanel" class="fixed bottom-[calc(env(safe-area-inset-bottom)+78px)] right-3 z-40 w-56 origin-bottom-right rounded-2xl border border-line bg-bar p-1.5 opacity-0 shadow-[0_16px_48px_rgba(0,0,0,0.6)] transition-all duration-150 ease-out pointer-events-none scale-95 translate-y-1">
+  <div id="menuPanel" class="fixed bottom-[calc(env(safe-area-inset-bottom)+78px)] right-3 z-[60] w-56 origin-bottom-right rounded-2xl border border-line bg-bar p-1.5 opacity-0 shadow-[0_16px_48px_rgba(0,0,0,0.6)] transition-all duration-150 ease-out pointer-events-none scale-95 translate-y-1">
     <button class="tap flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-fg active:bg-line">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted">
         <path d="M12 3v12" />
@@ -298,7 +300,7 @@
     </button>
   </div>
 
-  <div id="tabsBackdrop" class="pointer-events-none fixed inset-0 z-[65] bg-black/60 opacity-0 transition-opacity duration-200"></div>
+  <div id="tabsBackdrop" class="pointer-events-none fixed inset-0 z-[50] bg-black/60 opacity-0 transition-opacity duration-200"></div>
 
   <div id="tabsPanel" class="fixed inset-x-0 bottom-0 z-[66] max-h-[75dvh] translate-y-full overflow-y-auto rounded-t-2xl border-t border-line bg-bar pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-[0_-16px_48px_rgba(0,0,0,0.6)]">
     <div class="flex items-center justify-between border-b border-line px-4 py-3">
@@ -322,7 +324,7 @@
     </div>
   </div>
 
-  <footer class="relative shrink-0 border-t border-line bg-bar">
+  <footer class="relative z-[45] shrink-0 border-t border-line bg-bar">
     <div class="grid grid-cols-5 px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-1.5">
       <button id="backNavBtn" aria-label="Back" disabled class="tap flex h-12 items-center justify-center text-muted hover:text-fg disabled:opacity-40">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -472,7 +474,7 @@
     </div>
   </div>
 
-  <div id="historyBackdrop" class="pointer-events-none fixed inset-0 z-[99] bg-black/60 opacity-0 transition-opacity duration-200"></div>
+  <div id="historyBackdrop" class="pointer-events-none fixed inset-0 z-[50] bg-black/60 opacity-0 transition-opacity duration-200"></div>
 
   <div id="history-view" class="absolute inset-0 z-[100] h-full w-full flex-col overflow-y-auto text-fg">
     <div class="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-line bg-bar px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">

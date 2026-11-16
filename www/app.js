@@ -18,6 +18,7 @@ const backNavBtn = document.getElementById('backNavBtn');
 const forwardBtn = document.getElementById('forwardBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const mainView = document.getElementById('main-view');
+const webviewSnapshot = document.getElementById('webview-snapshot');
 const settingsView = document.getElementById('settings-view');
 const settingsBackBtn = document.getElementById('settingsBackBtn');
 const searchEngineSelect = document.getElementById('searchEngineSelect');
@@ -84,6 +85,9 @@ let suggestionsOpen = false;
 let typedQuery = null;
 let typedSearchUrl = null;
 let lastTitle = '';
+let snapshotVisible = false;
+let snapshotPromise = null;
+let snapshotToken = 0;
 const bootActiveTab = parseInt(localStorage.getItem('activeTabId') || '', 10);
 let activeTabId = Number.isNaN(bootActiveTab) ? null : bootActiveTab;
 
@@ -98,11 +102,52 @@ function setNativeWebViewVisible(visible) {
   if (setter) Promise.resolve(setter.call(plugin, { visible })).catch(() => {});
 }
 
+function hasOverlayOpen() {
+  return menuOpen || settingsOpen || tabsOpen || historyOpen || suggestionsOpen;
+}
+
+async function showWebViewSnapshot() {
+  if (snapshotVisible) return;
+  if (snapshotPromise) return snapshotPromise;
+  const plugin = getPlugin();
+  if (!plugin || !hasPage || typeof plugin.captureScreenshot !== 'function') return;
+  const token = snapshotToken;
+  snapshotPromise = Promise.resolve(plugin.captureScreenshot())
+    .then((result) => {
+      if (token !== snapshotToken || !hasOverlayOpen()) return;
+      const data = result && result.data;
+      if (!data || !webviewSnapshot) return;
+      webviewSnapshot.src = data.indexOf('data:') === 0 ? data : 'data:image/png;base64,' + data;
+      webviewSnapshot.classList.remove('hidden');
+      snapshotVisible = true;
+    })
+    .catch((error) => {
+      console.error('Failed to capture WebView snapshot', error);
+    })
+    .finally(() => {
+      snapshotPromise = null;
+    });
+  return snapshotPromise;
+}
+
+function hideWebViewSnapshot() {
+  snapshotToken++;
+  snapshotPromise = null;
+  snapshotVisible = false;
+  if (webviewSnapshot) {
+    webviewSnapshot.classList.add('hidden');
+    webviewSnapshot.removeAttribute('src');
+  }
+}
+
 function syncWebViewVisibility() {
-  if (menuOpen || settingsOpen || tabsOpen || historyOpen || suggestionsOpen) {
-    setNativeWebViewVisible(false);
-  } else if (hasPage) {
-    setNativeWebViewVisible(true);
+  if (hasOverlayOpen()) {
+    showWebViewSnapshot().then(() => {
+      if (hasOverlayOpen()) setNativeWebViewVisible(false);
+    });
+  } else {
+    hideWebViewSnapshot();
+    if (hasPage) setNativeWebViewVisible(true);
   }
 }
 

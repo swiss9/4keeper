@@ -124,7 +124,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
         });
 
-        webView.setVisibility(View.GONE);
+        webView.setVisibility(View.INVISIBLE);
 
         FrameLayout root = getActivity().findViewById(android.R.id.content);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(0, 0);
@@ -259,7 +259,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private void setWebViewVisibility(boolean isVisible) {
         if (webView != null) {
-            webView.setVisibility(isVisible ? View.VISIBLE : View.GONE);
+            webView.setVisibility(isVisible ? View.VISIBLE : View.INVISIBLE);
             if (isVisible) webView.bringToFront();
         }
     }

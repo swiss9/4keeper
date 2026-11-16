@@ -13,7 +13,6 @@ const urlInput = document.getElementById('urlInput');
 const browserContainer = document.getElementById('browser-container');
 const startScreen = document.getElementById('startScreen');
 const loadBar = document.getElementById('loadBar');
-const backBtn = document.getElementById('backBtn');
 const backNavBtn = document.getElementById('backNavBtn');
 const forwardBtn = document.getElementById('forwardBtn');
 const settingsBtn = document.getElementById('settingsBtn');
@@ -53,6 +52,10 @@ const tabsCount = document.getElementById('tabsCount');
 const tabTitleEl = document.getElementById('tabTitle');
 const tabUrlEl = document.getElementById('tabUrl');
 const tabsList = document.getElementById('tabsList');
+const lockBtn = document.getElementById('lockBtn');
+const siteInfoBackdrop = document.getElementById('siteInfoBackdrop');
+const siteInfoPanel = document.getElementById('siteInfoPanel');
+const siteInfoCloseBtn = document.getElementById('siteInfoCloseBtn');
 
 const SEARCH_ENGINES = {
   duckduckgo: 'https://duckduckgo.com/?q=',
@@ -79,6 +82,7 @@ let menuOpen = false;
 let settingsOpen = false;
 let historyOpen = false;
 let tabsOpen = false;
+let siteInfoOpen = false;
 let suggestTimer = null;
 let suggestRequestId = 0;
 let suggestionsOpen = false;
@@ -103,7 +107,7 @@ function setNativeWebViewVisible(visible) {
 }
 
 function hasOverlayOpen() {
-  return menuOpen || settingsOpen || tabsOpen || historyOpen || suggestionsOpen;
+  return menuOpen || settingsOpen || tabsOpen || historyOpen || suggestionsOpen || siteInfoOpen;
 }
 
 async function showWebViewSnapshot() {
@@ -141,7 +145,9 @@ function hideWebViewSnapshot() {
 }
 
 function syncWebViewVisibility() {
-  if (hasOverlayOpen()) {
+  const overlay = hasOverlayOpen();
+  document.body.style.overflow = overlay ? 'hidden' : '';
+  if (overlay) {
     showWebViewSnapshot().then(() => {
       if (hasOverlayOpen()) setNativeWebViewVisible(false);
     });
@@ -162,7 +168,6 @@ function getBounds() {
 }
 
 function setNav(canBack, canForward) {
-  backBtn.disabled = !canBack;
   backNavBtn.disabled = !canBack;
   forwardBtn.disabled = !canForward;
 }
@@ -575,6 +580,7 @@ function setMenu(open) {
     setTabs(false);
     setSettings(false);
     setHistory(false);
+    setSiteInfo(false);
   }
   syncWebViewVisibility();
 }
@@ -690,6 +696,7 @@ function setTabs(open) {
     setMenu(false);
     setSettings(false);
     setHistory(false);
+    setSiteInfo(false);
     renderTabs();
     updateTabsUi();
   }
@@ -701,9 +708,28 @@ tabsBackdrop.addEventListener('click', () => setTabs(false));
 tabsCloseBtn.addEventListener('click', () => setTabs(false));
 newTabBtn.addEventListener('click', () => newTab());
 
+function setSiteInfo(open) {
+  siteInfoOpen = open;
+  siteInfoPanel.classList.toggle('siteinfo-open', open);
+  siteInfoBackdrop.classList.toggle('opacity-0', !open);
+  siteInfoBackdrop.classList.toggle('pointer-events-auto', open);
+  if (open) {
+    setMenu(false);
+    setTabs(false);
+    setSettings(false);
+    setHistory(false);
+  }
+  syncWebViewVisibility();
+}
+
+lockBtn.addEventListener('click', () => setSiteInfo(!siteInfoOpen));
+siteInfoBackdrop.addEventListener('click', () => setSiteInfo(false));
+siteInfoCloseBtn.addEventListener('click', () => setSiteInfo(false));
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    if (tabsOpen) setTabs(false);
+    if (siteInfoOpen) setSiteInfo(false);
+    else if (tabsOpen) setTabs(false);
     else if (settingsOpen) setSettings(false);
     else if (historyOpen) setHistory(false);
     else setMenu(false);
@@ -715,6 +741,7 @@ function setSettings(open) {
     setMenu(false);
     setTabs(false);
     setHistory(false);
+    setSiteInfo(false);
   }
   settingsOpen = open;
   settingsView.classList.toggle('settings-open', open);
@@ -811,6 +838,7 @@ function setHistory(open) {
     setMenu(false);
     setTabs(false);
     setSettings(false);
+    setSiteInfo(false);
     renderHistory();
   }
   syncWebViewVisibility();
@@ -962,7 +990,6 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
   }
 });
 
-backBtn.addEventListener('click', goBack);
 backNavBtn.addEventListener('click', goBack);
 forwardBtn.addEventListener('click', goForward);
 document.getElementById('homeBtn').addEventListener('click', goHome);

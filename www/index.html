@@ -170,7 +170,7 @@
       </button>
 
       <div class="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[#27272a] bg-[#18181b] pl-3.5 pr-2 py-1 transition-colors duration-150 focus-within:border-zinc-500">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 min-w-[16px] shrink-0 self-center text-zinc-400">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5 w-3.5 h-3.5 shrink-0 self-center text-zinc-400">
           <rect x="5" y="11" width="14" height="10" rx="2" />
           <path d="M8 11V7a4 4 0 0 1 8 0v4" />
         </svg>
@@ -472,7 +472,9 @@
     </div>
   </div>
 
-  <div id="history-view" class="absolute inset-0 z-[100] h-full w-full flex-col overflow-y-auto bg-black/60 text-fg">
+  <div id="historyBackdrop" class="pointer-events-none fixed inset-0 z-[99] bg-black/60 opacity-0 transition-opacity duration-200"></div>
+
+  <div id="history-view" class="absolute inset-0 z-[100] h-full w-full flex-col overflow-y-auto text-fg">
     <div class="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-line bg-bar px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+10px)]">
       <button id="historyBackBtn" aria-label="Back" class="tap flex h-10 shrink-0 items-center gap-1.5 border border-line px-3 font-mono text-[12px] font-semibold uppercase tracking-wider text-fg hover:bg-line/40">
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

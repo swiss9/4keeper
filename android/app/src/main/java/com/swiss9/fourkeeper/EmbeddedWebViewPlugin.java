@@ -947,7 +947,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 toast("Downloads are not available on this device.");
                 return;
             }
-            String filename = DownloadManager.guessFileName(url, contentDisposition, mimeType);
+            String filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType);
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
             request.setMimeType(mimeType);
             if (userAgent != null && !userAgent.isEmpty()) {

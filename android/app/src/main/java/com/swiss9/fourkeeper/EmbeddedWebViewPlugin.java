@@ -3,8 +3,11 @@ package com.swiss9.fourkeeper;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.net.Uri;
+import android.util.Base64;
 import android.util.TypedValue;
 import android.view.View;
 import android.webkit.CookieManager;
@@ -16,6 +19,8 @@ import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+
+import java.io.ByteArrayOutputStream;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -257,6 +262,53 @@ public class EmbeddedWebViewPlugin extends Plugin {
             webView.setVisibility(isVisible ? View.VISIBLE : View.GONE);
             if (isVisible) webView.bringToFront();
         }
+    }
+
+    @PluginMethod
+    public void captureScreenshot(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            if (webView == null) {
+                call.reject("WebView is not available.");
+                return;
+            }
+            try {
+                int width = webView.getWidth();
+                int height = webView.getHeight();
+                if (width <= 0 || height <= 0) {
+                    View parent = (View) webView.getParent();
+                    if (parent != null) {
+                        width = parent.getWidth();
+                        height = parent.getHeight();
+                    }
+                }
+                if (width <= 0 || height <= 0) {
+                    call.reject("WebView has no size.");
+                    return;
+                }
+
+                webView.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+                );
+                webView.layout(0, 0, width, height);
+
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                bitmap.eraseColor(Color.parseColor("#09090b"));
+                webView.draw(canvas);
+
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
+                bitmap.recycle();
+
+                String encoded = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP);
+                JSObject result = new JSObject();
+                result.put("data", encoded);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("Failed to capture screenshot: " + error.getMessage());
+            }
+        });
     }
 
     @PluginMethod

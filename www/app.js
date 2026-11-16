@@ -30,6 +30,7 @@ const clearDataBtn = document.getElementById('clearDataBtn');
 const suggestionsDropdown = document.getElementById('suggestions-dropdown');
 const suggestionsList = document.getElementById('suggestionsList');
 const historyView = document.getElementById('history-view');
+const historyBackdrop = document.getElementById('historyBackdrop');
 const historyBackBtn = document.getElementById('historyBackBtn');
 const historyMenuBtn = document.getElementById('historyMenuBtn');
 const historyList = document.getElementById('history-list');
@@ -675,7 +676,10 @@ function setSettings(open) {
   syncWebViewVisibility();
 }
 
-settingsBtn.addEventListener('click', () => setSettings(true));
+settingsBtn.addEventListener('click', () => {
+  setMenu(false);
+  setSettings(true);
+});
 settingsBackBtn.addEventListener('click', () => setSettings(false));
 
 function historyDayKey(timestamp) {
@@ -754,6 +758,10 @@ function renderHistory() {
 function setHistory(open) {
   historyOpen = open;
   historyView.classList.toggle('history-open', open);
+  if (historyBackdrop) {
+    historyBackdrop.classList.toggle('opacity-0', !open);
+    historyBackdrop.classList.toggle('pointer-events-auto', open);
+  }
   if (open) {
     setMenu(false);
     setTabs(false);
@@ -764,6 +772,7 @@ function setHistory(open) {
 }
 
 historyMenuBtn.addEventListener('click', () => setHistory(true));
+historyBackdrop.addEventListener('click', () => setHistory(false));
 historyBackBtn.addEventListener('click', () => setHistory(false));
 clearHistoryBtn.addEventListener('click', () => setClearDataModal(true));
 

@@ -138,6 +138,7 @@ const dom = {
   tabSheetCount: $('tabSheetCount'),
   tabsList: $('tabsList'),
   tabsEmpty: $('tabsEmpty'),
+  tabsEmptyNewTabBtn: $('tabsEmptyNewTabBtn'),
   newTabBtn: $('newTabBtn'),
   closeAllTabsBtn: $('closeAllTabsBtn'),
   closeTabSheetBtn: $('closeTabSheetBtn'),
@@ -589,6 +590,7 @@ function updateTabBadge() {
   dom.tabsBadge.textContent = String(count);
   dom.tabsBadge.classList.toggle('hidden', count === 0);
   dom.tabSheetCount.textContent = String(count);
+  if (dom.closeAllTabsBtn) dom.closeAllTabsBtn.disabled = count === 0;
 }
 
 function updateMenuCounts() {
@@ -739,6 +741,67 @@ function closeOtherSheets(keep) {
   if (keep !== 'menu') closeMenu();
   if (keep !== 'siteInfo') closeSiteInfo();
   if (keep !== 'choice') closeChoice();
+}
+
+function attachSheetDrag(sheet, closeFn) {
+  const handle = sheet.querySelector('.sheet-handle');
+  if (!handle) return;
+  let startY = null;
+  let lastY = 0;
+  let lastT = 0;
+  let velocity = 0;
+
+  const endDrag = (dismiss) => {
+    sheet.classList.remove('is-dragging');
+    if (dismiss) {
+      sheet.style.transform = '';
+      closeFn();
+    } else {
+      sheet.style.transform = '';
+    }
+    startY = null;
+    velocity = 0;
+  };
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (startY !== null) return;
+    startY = event.clientY;
+    lastY = startY;
+    lastT = event.timeStamp;
+    velocity = 0;
+    sheet.classList.add('is-dragging');
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch (error) {
+      /* ignore */
+    }
+  });
+
+  handle.addEventListener('pointermove', (event) => {
+    if (startY === null) return;
+    const dy = event.clientY - startY;
+    const dt = Math.max(event.timeStamp - lastT, 1);
+    velocity = (event.clientY - lastY) / dt;
+    lastY = event.clientY;
+    lastT = event.timeStamp;
+    sheet.style.transform = 'translateY(' + Math.max(dy, 0) + 'px)';
+  });
+
+  const onRelease = () => {
+    if (startY === null) return;
+    const dy = parseFloat((sheet.style.transform || '').replace('translateY(', '')) || 0;
+    endDrag(dy > 110 || velocity > 0.65);
+  };
+
+  handle.addEventListener('pointerup', onRelease);
+  handle.addEventListener('pointercancel', onRelease);
+}
+
+function attachSheetDrags() {
+  if (dom.tabSheet) attachSheetDrag(dom.tabSheet, closeTabSheet);
+  if (dom.menuSheet) attachSheetDrag(dom.menuSheet, closeMenu);
+  if (dom.siteInfoSheet) attachSheetDrag(dom.siteInfoSheet, closeSiteInfo);
+  if (dom.choiceSheet) attachSheetDrag(dom.choiceSheet, closeChoice);
 }
 
 function openTabSheet() {
@@ -1020,21 +1083,27 @@ function renderTabs() {
     .map((tab) => {
       const isActive = tab.id === activeTabId;
       const title = tab.title || 'New tab';
-      const url = displayUrl(tab.url) || 'No page loaded';
+      const host = hostOf(tab.url) || (isActive ? 'Start page' : 'Empty tab');
+      const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
+      const favicon = host ? favicons[hostOf(tab.url)] : null;
+      const preview = favicon
+        ? `<span class="tab-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
+        : `<span class="tab-monogram">${escapeHtml(monogram)}</span>`;
+      const miniFavicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
       return `
-        <div class="tab-card${isActive ? ' is-active' : ''}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title)}">
-          <div class="tab-card-head">
-            ${faviconMarkup(tab.url)}
-            <span class="tab-card-title">${escapeHtml(title)}</span>
-            <button class="tab-card-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab">
+        <div class="tab-card${isActive ? ' is-active' : ''}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="Switch to tab: ${escapeHtml(title)}" aria-pressed="${isActive}">
+          <div class="tab-preview">
+            ${preview}
+            <button class="tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
               ${svgIcon('close', 'icon icon-xs')}
             </button>
           </div>
-          <div class="tab-card-url">${escapeHtml(url)}</div>
-          <div class="tab-card-foot">
-            ${isActive
-              ? '<span class="tab-active-dot"></span><span>Active</span>'
-              : `<span>${escapeHtml(hostOf(tab.url) || 'Tab')}</span>`}
+          <div class="tab-meta">
+            <div class="tab-meta-title">
+              ${miniFavicon}
+              <span class="tab-title">${escapeHtml(title)}</span>
+            </div>
+            <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}</div>
           </div>
         </div>`;
     })
@@ -1627,21 +1696,15 @@ function renderSiteInfo() {
 
 /* --------------------------------------------------------------- Settings */
 
-function settingsHero(icon, title, description) {
+function settingSection(title, rows) {
   return `
-    <div class="settings-hero">
-      <span class="settings-hero-icon">${svgIcon(icon)}</span>
-      <div>
-        <div class="settings-hero-title">${escapeHtml(title)}</div>
-        <div class="settings-hero-text">${escapeHtml(description)}</div>
-      </div>
-    </div>`;
+    <div class="section-label">${escapeHtml(title)}</div>
+    <div class="setting-group">${rows}</div>`;
 }
 
 function settingRowButton(icon, label, description, value, action) {
   return `
     <button class="setting-row" type="button" data-action="${escapeHtml(action)}">
-      <span class="setting-icon">${svgIcon(icon)}</span>
       <span class="setting-text">
         <span class="setting-label">${escapeHtml(label)}</span>
         ${description ? `<span class="setting-desc">${escapeHtml(description)}</span>` : ''}
@@ -1654,7 +1717,7 @@ function settingRowButton(icon, label, description, value, action) {
 function settingRowToggle(key, label, description) {
   const on = !!settings[key];
   return `
-    <div class="setting-row">
+    <div class="setting-row is-toggle" data-toggle="${escapeHtml(key)}">
       <span class="setting-text">
         <span class="setting-label">${escapeHtml(label)}</span>
         ${description ? `<span class="setting-desc">${escapeHtml(description)}</span>` : ''}
@@ -1668,7 +1731,6 @@ function settingRowToggle(key, label, description) {
 function settingRowAction(icon, label, description, action, danger) {
   return `
     <button class="setting-row${danger ? ' is-danger' : ''}" type="button" data-action="${escapeHtml(action)}">
-      <span class="setting-icon">${svgIcon(icon)}</span>
       <span class="setting-text">
         <span class="setting-label">${escapeHtml(label)}</span>
         ${description ? `<span class="setting-desc">${escapeHtml(description)}</span>` : ''}
@@ -1677,7 +1739,7 @@ function settingRowAction(icon, label, description, action, danger) {
     </button>`;
 }
 
-function settingNavRow(icon, label, description, section) {
+function settingNavRow(icon, label, description, section, value) {
   return `
     <button class="setting-row" type="button" data-section="${escapeHtml(section)}">
       <span class="setting-icon">${svgIcon(icon)}</span>
@@ -1685,6 +1747,7 @@ function settingNavRow(icon, label, description, section) {
         <span class="setting-label">${escapeHtml(label)}</span>
         ${description ? `<span class="setting-desc">${escapeHtml(description)}</span>` : ''}
       </span>
+      <span class="setting-value">${escapeHtml(value || '')}</span>
       ${svgIcon('chevron', 'icon icon-sm setting-chevron')}
     </button>`;
 }
@@ -1698,93 +1761,83 @@ function renderSettingsRoot() {
   dom.settingsPage.innerHTML = '';
 
   dom.settingsRoot.innerHTML = `
-    <div class="setting-group">${settingNavRow('palette', 'Appearance', 'Theme, density and address style', 'appearance')}</div>
-    <div class="setting-group">${settingNavRow('search', 'Search', 'Search engine, homepage and suggestions', 'search')}</div>
-    <div class="setting-group">${settingNavRow('shield', 'Privacy and security', 'Tracking protection, cookies and safe browsing', 'privacy')}</div>
-    <div class="setting-group">${settingNavRow('sliders', 'Site settings', 'JavaScript, pop-ups, zoom and desktop mode', 'site')}</div>
-    <div class="setting-group">${settingNavRow('download', 'Downloads', 'Download notifications', 'downloads')}</div>
-    <div class="setting-group">${settingNavRow('trash', 'Delete browsing data', 'Clear history, cookies and cache', 'data')}</div>
-    <div class="setting-group">${settingNavRow('info', 'About 4Keeper', 'Version, engine and licenses', 'about')}</div>`;
-}
-
-function pageNav(title, description, section) {
-  return `
-    <div class="settings-nav">
-      <button class="settings-back" type="button" data-section="root">
-        ${svgIcon('chevron', 'icon icon-sm settings-back-icon')}
-        <span>Settings</span>
-      </button>
-      <div class="settings-nav-title">${escapeHtml(title)}</div>
-      <div class="settings-nav-desc">${escapeHtml(description)}</div>
-      <span class="visually-hidden">${escapeHtml(section || '')}</span>
-    </div>`;
+    ${settingSection('General', `
+      ${settingNavRow('palette', 'Appearance', 'Theme, density and address style', 'appearance', themeLabel())}
+      ${settingNavRow('search', 'Search', 'Search engine, homepage and startup', 'search', engineLabel())}
+      ${settingNavRow('shield', 'Privacy and security', 'Tracking, cookies and safe browsing', 'privacy', cookiesLabel())}
+    `)}
+    ${settingSection('Content', `
+      ${settingNavRow('sliders', 'Site settings', 'JavaScript, pop-ups and zoom', 'site', (Number(settings.textZoom) || 100) + '%')}
+      ${settingNavRow('download', 'Downloads', 'Notifications and saved files', 'downloads', settings.downloadNotifications ? 'On' : 'Off')}
+    `)}
+    ${settingSection('Data', `
+      ${settingNavRow('trash', 'Delete browsing data', 'Clear history, cookies and cache', 'data')}
+      ${settingNavRow('info', 'About 4Keeper', 'Version, engine and licenses', 'about', appInfo && appInfo.versionName ? 'v' + appInfo.versionName : '')}
+    `)}`;
 }
 
 function settingsPageAppearance() {
-  return pageNav('Appearance', 'How 4Keeper looks on this device.', 'appearance') +
-    settingsHero('palette', 'Make it yours', 'Choose a theme and density that fit your screen.') +
-    `<div class="setting-group">
+  return settingSection('Theme', `
       ${settingRowButton('palette', 'Theme', 'System follows your device', themeLabel(), 'theme')}
       ${settingRowButton('sliders', 'Density', 'Spacing of controls and lists', densityLabel(), 'density')}
+    `) +
+    settingSection('Address bar', `
       ${settingRowToggle('showFullUrl', 'Show full address', 'Show https:// and the complete path')}
-    </div>`;
+    `);
 }
 
 function settingsPageSearch() {
-  return pageNav('Search', 'Defaults for the address bar and new tabs.', 'search') +
-    settingsHero('search', 'Search and homepage', 'Pick the engine used for typed queries.') +
-    `<div class="setting-group">
+  return settingSection('Search', `
       ${settingRowButton('search', 'Search engine', 'Used when you type a query', engineLabel(), 'engine')}
+      ${settingRowToggle('suggestions', 'Search suggestions', 'Fetch suggestions as you type')}
+    `) +
+    settingSection('Homepage', `
       ${settingRowButton('link', 'Homepage', 'Opened by the Home button', settings.homePage || getEngine().home, 'homePage')}
       ${settingRowButton('text', 'On startup', 'What opens when the app starts', startupLabel(), 'startup')}
-      ${settingRowToggle('suggestions', 'Search suggestions', 'Fetch suggestions as you type')}
-    </div>`;
+    `);
 }
 
 function settingsPagePrivacy() {
-  return pageNav('Privacy and security', 'Protect what you browse.', 'privacy') +
-    settingsHero('shield', 'Private by default', '4Keeper applies these settings to every tab.') +
-    `<div class="setting-group">
+  return settingSection('Protection', `
       ${settingRowToggle('trackingProtection', 'Tracking protection', 'Block known tracking hosts')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
+    `) +
+    settingSection('Cookies', `
       ${settingRowButton('shield', 'Cookies', 'How sites may store cookies', cookiesLabel(), 'cookies')}
-    </div>
-    <div class="setting-note">4Keeper does not ask for camera, microphone or location access. Permissions are handled by Android and the sites you choose to use.</div>`;
+    `) +
+    `<div class="setting-note">4Keeper does not ask for camera, microphone or location access. Permissions are handled by Android and the sites you choose to use.</div>`;
 }
 
 function settingsPageSite() {
-  return pageNav('Site settings', 'Control page behavior across tabs.', 'site') +
-    settingsHero('sliders', 'Page behavior', 'Changing these settings reloads open tabs.') +
-    `<div class="setting-group">
+  return settingSection('Content', `
       ${settingRowToggle('javaScript', 'JavaScript', 'Required by most modern sites')}
       ${settingRowToggle('popups', 'Pop-ups', 'Allow sites to open new windows')}
       ${settingRowToggle('webDarkMode', 'Web dark mode', 'Ask sites to use a dark theme')}
       ${settingRowButton('text', 'Text zoom', 'Scale text inside pages', (Number(settings.textZoom) || 100) + '%', 'textZoom')}
       ${settingRowToggle('desktopMode', 'Desktop site', 'Request desktop versions of pages')}
-    </div>
-    <div class="setting-group">
+    `) +
+    settingSection('Zoom', `
       ${settingRowToggle('pinchZoom', 'Pinch to zoom', 'Allow two-finger zoom on pages')}
       ${settingRowToggle('zoomControls', 'On-screen zoom buttons', 'Show zoom controls when pinch zoom is on')}
-    </div>`;
+    `) +
+    `<div class="setting-note">Content settings apply to every tab and reload open pages when changed.</div>`;
 }
 
 function settingsPageDownloads() {
-  return pageNav('Downloads', 'Files saved by 4Keeper.', 'downloads') +
-    settingsHero('download', 'Downloads folder', 'Files are stored privately inside the app.') +
-    `<div class="setting-group">
+  return settingSection('Notifications', `
       ${settingRowToggle('downloadNotifications', 'Download notifications', 'Show progress and completion notices')}
+    `) +
+    settingSection('Files', `
       ${settingRowAction('download', 'View downloads', 'Open the downloads list', 'openDownloads')}
-    </div>
-    <div class="setting-note">Android does not allow 4Keeper to become the system default browser, so downloads use the app's own folder.</div>`;
+    `) +
+    `<div class="setting-note">Android does not allow 4Keeper to become the system default browser, so downloads use the app's own folder.</div>`;
 }
 
 function settingsPageData() {
-  return pageNav('Delete browsing data', 'Clear what this app has stored.', 'data') +
-    settingsHero('trash', 'Browsing data', 'Choose what to remove from this device.') +
-    `<div class="setting-group">
+  return settingSection('Browsing data', `
       ${settingRowAction('trash', 'Clear browsing data', 'History, cookies, cache and site data', 'clearData', true)}
-    </div>
-    <div class="setting-note">Settings, bookmarks and downloads are not removed by clearing browsing data.</div>`;
+    `) +
+    `<div class="setting-note">Settings, bookmarks and downloads are not removed by clearing browsing data.</div>`;
 }
 
 function settingsPageAbout() {
@@ -1792,22 +1845,22 @@ function settingsPageAbout() {
   const webview = appInfo && appInfo.webViewVersion ? appInfo.webViewVersion : '—';
   const android = appInfo && appInfo.androidVersion ? appInfo.androidVersion : '—';
   const device = appInfo && appInfo.deviceModel ? appInfo.deviceModel : '—';
-  return pageNav('About 4Keeper', 'A fast, private Android browser.', 'about') +
-    `<div class="about-card">
+  return `
+    <div class="about-card">
       <div class="about-logo">${svgIcon('globe')}</div>
       <div class="about-name">4Keeper</div>
       <div class="about-version">Version ${escapeHtml(version)}</div>
-    </div>
-    <div class="setting-group">
+    </div>` +
+    settingSection('System', `
       <div class="setting-row static"><span class="setting-text"><span class="setting-label">Android</span></span><span class="setting-value">${escapeHtml(android)}</span></div>
       <div class="setting-row static"><span class="setting-text"><span class="setting-label">WebView</span></span><span class="setting-value">${escapeHtml(webview)}</span></div>
       <div class="setting-row static"><span class="setting-text"><span class="setting-label">Device</span></span><span class="setting-value">${escapeHtml(device)}</span></div>
-    </div>
-    <div class="setting-group">
+    `) +
+    settingSection('More', `
       ${settingRowAction('info', 'Open source licenses', 'Capacitor, AndroidX and icons', 'licenses')}
       ${settingRowAction('trash', 'Reset all settings', 'Restore every default', 'reset', true)}
-    </div>
-    <div class="setting-note">4Keeper is built with Capacitor and Android WebView. Pages are rendered by Android's system WebView.</div>`;
+    `) +
+    `<div class="setting-note">4Keeper is built with Capacitor and Android WebView. Pages are rendered by Android's system WebView.</div>`;
 }
 
 function showSettingsSection(section) {
@@ -2128,6 +2181,7 @@ function attachUiListeners() {
 
   dom.closeTabSheetBtn.addEventListener('click', closeTabSheet);
   dom.tabSheetBackdrop.addEventListener('click', closeTabSheet);
+  dom.tabsEmptyNewTabBtn.addEventListener('click', () => newTab());
   dom.newTabBtn.addEventListener('click', () => newTab());
   dom.closeAllTabsBtn.addEventListener('click', () => {
     if (!tabs.length) return;
@@ -2514,6 +2568,7 @@ async function boot() {
   applyTheme();
   applyDensity();
   attachUiListeners();
+  attachSheetDrags();
   attachNativeListeners();
 
   await Store.hydrate();

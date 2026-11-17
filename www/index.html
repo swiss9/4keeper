@@ -96,15 +96,16 @@
 
     <!-- Tab manager -->
     <div id="tabSheetBackdrop" class="backdrop"></div>
-    <section id="tabSheet" class="sheet" role="dialog" aria-modal="true" aria-label="Tabs" aria-hidden="true">
+    <section id="tabSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" aria-label="Tabs" aria-hidden="true">
       <div class="sheet-handle"></div>
       <div class="sheet-head">
-        <h2 class="sheet-title">Tabs <small id="tabSheetCount">0</small></h2>
+        <h2 class="sheet-title">Tabs</h2>
+        <span id="tabSheetCount" class="count-chip" aria-label="Open tabs">0</span>
         <div class="sheet-actions">
           <button id="newTabBtn" class="icon-btn" type="button" aria-label="New tab">
             <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <button id="closeAllTabsBtn" class="icon-btn" type="button" aria-label="Close all tabs">
+          <button id="closeAllTabsBtn" class="icon-btn" type="button" aria-label="Close all tabs" disabled>
             <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
           </button>
           <button id="closeTabSheetBtn" class="icon-btn" type="button" aria-label="Close tab manager">
@@ -120,6 +121,7 @@
           </div>
           <div class="empty-title">No open tabs</div>
           <div class="empty-desc">Open a new tab to start browsing.</div>
+          <button id="tabsEmptyNewTabBtn" class="btn btn-primary empty-action" type="button">New tab</button>
         </div>
       </div>
     </section>

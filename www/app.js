@@ -40,6 +40,8 @@ const DEFAULT_SETTINGS = {
   homePage: '',
   startup: 'restore',
   suggestions: true,
+  suggestBookmarks: true,
+  suggestHistory: true,
   showFullUrl: false,
   webDarkMode: false,
   trackingProtection: false,
@@ -107,6 +109,7 @@ let loadingTimer = null;
 let dialogState = null;
 let dialogBusy = false;
 let sessionTimer = null;
+let readingModeOn = false;
 
 const overlays = new Set();
 
@@ -153,6 +156,9 @@ const dom = {
   menuHistoryBtn: $('menuHistoryBtn'),
   menuHistoryCount: $('menuHistoryCount'),
   menuDownloadsBtn: $('menuDownloadsBtn'),
+  menuDesktopBtn: $('menuDesktopBtn'),
+  menuDesktopMeta: $('menuDesktopMeta'),
+  menuReadingBtn: $('menuReadingBtn'),
   menuSettingsBtn: $('menuSettingsBtn'),
   siteInfoSheet: $('siteInfoSheet'),
   siteInfoBackdrop: $('siteInfoBackdrop'),
@@ -603,6 +609,13 @@ function updateMenuBookmark() {
   dom.menuBookmarkLabel.textContent = saved ? 'Remove bookmark' : 'Bookmark this page';
 }
 
+function updateMenuModes() {
+  const desktopOn = !!settings.desktopMode;
+  if (dom.menuDesktopMeta) dom.menuDesktopMeta.textContent = desktopOn ? 'On' : '';
+  if (dom.menuDesktopBtn) dom.menuDesktopBtn.setAttribute('aria-checked', String(desktopOn));
+  if (dom.menuReadingBtn) dom.menuReadingBtn.setAttribute('aria-checked', String(readingModeOn));
+}
+
 function syncActiveTabUi() {
   const tab = activeTab();
   currentUrl = tab && tab.url ? tab.url : '';
@@ -829,7 +842,30 @@ function openMenu() {
   closeOtherSheets('menu');
   updateMenuCounts();
   updateMenuBookmark();
+  updateMenuModes();
   syncNativeVisibility();
+}
+
+function toggleDesktopSite() {
+  const next = !settings.desktopMode;
+  updateSetting({ desktopMode: next }, { toastMessage: next ? 'Desktop site on' : 'Desktop site off' });
+  readingModeOn = false;
+  callPlugin('setDesktopMode', { enabled: next })
+    .catch(() => pushNativeSettings(true));
+  closeMenu();
+}
+
+function toggleReadingMode() {
+  const next = !readingModeOn;
+  if (!isHttpUrl(currentUrl)) {
+    toast('Open a page to use reading mode');
+    closeMenu();
+    return;
+  }
+  readingModeOn = next;
+  callPlugin('toggleReadingMode', { enabled: next }).catch(() => {});
+  toast(next ? 'Reading mode on' : 'Reading mode off');
+  closeMenu();
 }
 
 function closeMenu() {
@@ -1002,6 +1038,9 @@ function updateSetting(patch, options) {
   if (opts.toastMessage) toast(opts.toastMessage);
   if (patch.showFullUrl !== undefined) syncActiveTabUi();
   if (patch.suggestions !== undefined && !settings.suggestions) hideSuggestions();
+  if (['suggestions', 'suggestBookmarks', 'suggestHistory'].some((key) => patch[key] !== undefined) && settings.suggestions) {
+    scheduleSuggestions();
+  }
 }
 
 /* ------------------------------------------------------------------ Tabs */
@@ -1283,8 +1322,8 @@ function localSuggestions(query) {
     seen.add(url);
     results.push({ url, text: title || displayUrl(url), hint });
   };
-  bookmarks.forEach((item) => add(item.url, item.title, 'Bookmark'));
-  history.forEach((item) => add(item.url, item.title, 'History'));
+  if (settings.suggestBookmarks !== false) bookmarks.forEach((item) => add(item.url, item.title, 'Bookmark'));
+  if (settings.suggestHistory !== false) history.forEach((item) => add(item.url, item.title, 'History'));
   return results.slice(0, 5);
 }
 
@@ -1314,6 +1353,33 @@ function showSuggestionItems(items) {
   }
 }
 
+async function fetchRemoteSuggestions(url) {
+  let body = null;
+  try {
+    const result = await callPlugin('fetchUrl', { url });
+    if (result && typeof result.body === 'string' && result.body) body = result.body;
+  } catch (error) {
+    body = null;
+  }
+  if (!body) {
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeout = window.setTimeout(() => controller && controller.abort(), 3000);
+      const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
+      window.clearTimeout(timeout);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      body = await response.text();
+    } catch (error) {
+      return null;
+    }
+  }
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    return null;
+  }
+}
+
 async function fetchSuggestions(query) {
   const engine = getEngine();
   const local = localSuggestions(query);
@@ -1321,27 +1387,18 @@ async function fetchSuggestions(query) {
   if (!engine.suggest) return;
 
   const requestId = ++suggestionRequest;
-  try {
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = window.setTimeout(() => controller && controller.abort(), 3000);
-    const response = await fetch(engine.suggest(query), controller ? { signal: controller.signal } : undefined);
-    window.clearTimeout(timeout);
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const data = await response.json();
-    if (requestId !== suggestionRequest) return;
+  const data = await fetchRemoteSuggestions(engine.suggest(query));
+  if (!data || requestId !== suggestionRequest) return;
 
-    const merged = local.slice();
-    const seen = new Set(merged.map((item) => item.text.toLowerCase()));
-    parseSuggestions(data, settings.searchEngine).forEach((text) => {
-      const key = String(text).toLowerCase();
-      if (!text || seen.has(key)) return;
-      seen.add(key);
-      merged.push({ text: String(text), hint: '' });
-    });
-    showSuggestionItems(merged.slice(0, 8));
-  } catch (error) {
-    if (requestId === suggestionRequest && !suggestionItems.length) hideSuggestions();
-  }
+  const merged = local.slice();
+  const seen = new Set(merged.map((item) => item.text.toLowerCase()));
+  parseSuggestions(data, settings.searchEngine).forEach((text) => {
+    const key = String(text).toLowerCase();
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+    merged.push({ text: String(text), hint: '' });
+  });
+  showSuggestionItems(merged.slice(0, 8));
 }
 
 function scheduleSuggestions() {
@@ -1385,18 +1442,95 @@ function removeHistoryEntry(id) {
   updateMenuCounts();
 }
 
-function clearHistory() {
+const DATA_RANGES = [
+  ['15min', 'Last 15 minutes', 15 * 60000],
+  ['hour', 'Last hour', 3600000],
+  ['day', 'Last 24 hours', 86400000],
+  ['week', 'Last 7 days', 7 * 86400000],
+  ['month', 'Last 4 weeks', 28 * 86400000],
+  ['all', 'All time', Infinity]
+];
+
+function clearHistoryData(range) {
+  const def = DATA_RANGES.find((item) => item[0] === range) || DATA_RANGES[5];
+  if (def[2] === Infinity) {
+    history = [];
+  } else {
+    const cutoff = Date.now() - def[2];
+    history = history.filter((item) => item.timestamp < cutoff);
+  }
+  Store.save('history');
+  renderHistory();
+  updateMenuCounts();
+  if (overlays.has('history')) renderHistory();
+}
+
+function openClearData() {
   openDialog({
-    title: 'Clear browsing history?',
-    message: 'Your saved history on this device will be removed. Bookmarks and settings stay.',
-    confirmLabel: 'Clear history',
+    title: 'Delete browsing data',
+    message: 'Choose a time range and what to remove. Bookmarks, settings and downloads stay.',
+    confirmLabel: 'Delete data',
     destructive: true,
-    onConfirm: () => {
-      history = [];
-      Store.save('history');
-      renderHistory();
-      updateMenuCounts();
-      toast('History cleared');
+    body: (body) => {
+      const label = el('label', 'dialog-select-label');
+      label.setAttribute('for', 'clearDataRange');
+      label.textContent = 'Time range';
+
+      const select = el('select', 'dialog-select');
+      select.id = 'clearDataRange';
+      DATA_RANGES.forEach(([value, text]) => {
+        const option = el('option', '', text);
+        option.value = value;
+        select.appendChild(option);
+      });
+
+      const wrap = el('div', 'dialog-options');
+      [
+        ['history', 'Browsing history', true],
+        ['cookies', 'Cookies and site data', true],
+        ['cache', 'Cached images and files', true]
+      ].forEach(([key, text, checked]) => {
+        const row = el('label', 'dialog-check');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'clear-' + key;
+        input.checked = checked;
+        row.append(input, el('span', '', text));
+        wrap.appendChild(row);
+      });
+
+      body.append(label, select, wrap);
+    },
+    onConfirm: async () => {
+      const rangeSelect = $('clearDataRange');
+      const range = rangeSelect ? rangeSelect.value : 'all';
+      const checked = (key) => {
+        const input = $('clear-' + key);
+        return !!(input && input.checked);
+      };
+      const flags = {
+        history: checked('history'),
+        cookies: checked('cookies'),
+        cache: checked('cache')
+      };
+      if (!flags.history && !flags.cookies && !flags.cache) {
+        toast('Nothing selected to delete');
+        return false;
+      }
+      if (flags.history) clearHistoryData(range);
+      if (flags.cookies || flags.cache) {
+        try {
+          await callPlugin('clearBrowsingData', {
+            history: false,
+            cookies: flags.cookies,
+            cache: flags.cache,
+            downloads: false
+          });
+        } catch (error) {
+          toast('Could not clear some browsing data');
+        }
+      }
+      toast('Browsing data deleted');
     }
   });
 }
@@ -1714,10 +1848,10 @@ function settingRowButton(icon, label, description, value, action) {
     </button>`;
 }
 
-function settingRowToggle(key, label, description) {
+function settingRowToggle(key, label, description, extraClass) {
   const on = !!settings[key];
   return `
-    <div class="setting-row is-toggle" data-toggle="${escapeHtml(key)}">
+    <div class="setting-row is-toggle${extraClass ? ' ' + extraClass : ''}" data-toggle="${escapeHtml(key)}">
       <span class="setting-text">
         <span class="setting-label">${escapeHtml(label)}</span>
         ${description ? `<span class="setting-desc">${escapeHtml(description)}</span>` : ''}
@@ -1790,6 +1924,8 @@ function settingsPageSearch() {
   return settingSection('Search', `
       ${settingRowButton('search', 'Search engine', 'Used when you type a query', engineLabel(), 'engine')}
       ${settingRowToggle('suggestions', 'Search suggestions', 'Fetch suggestions as you type')}
+      ${settingRowToggle('suggestBookmarks', 'Show bookmarks in suggestions', 'Compact list below the address bar', 'is-sub')}
+      ${settingRowToggle('suggestHistory', 'Show history in suggestions', 'Recently visited pages as you type', 'is-sub')}
     `) +
     settingSection('Homepage', `
       ${settingRowButton('link', 'Homepage', 'Opened by the Home button', settings.homePage || getEngine().home, 'homePage')}
@@ -2024,62 +2160,6 @@ function handleSettingsAction(action) {
   }
 }
 
-function openClearData() {
-  openDialog({
-    title: 'Clear browsing data',
-    message: 'Select what to remove. Bookmarks, settings and downloaded files stay.',
-    confirmLabel: 'Clear data',
-    destructive: true,
-    body: (body) => {
-      const options = [
-        ['history', 'Browsing history', true],
-        ['cookies', 'Cookies and site data', true],
-        ['cache', 'Cached pages and files', true],
-        ['downloads', 'Downloads list', false]
-      ];
-      const wrap = el('div', 'dialog-options');
-      options.forEach(([key, label, checked]) => {
-        const row = el('label', 'dialog-check');
-        const input = document.createElement('input');
-        input.type = 'checkbox';
-        input.id = 'clear-' + key;
-        input.checked = checked;
-        row.append(input, el('span', '', label));
-        wrap.appendChild(row);
-      });
-      body.appendChild(wrap);
-    },
-    onConfirm: async () => {
-      const checked = (key) => {
-        const input = $('clear-' + key);
-        return !!(input && input.checked);
-      };
-      const flags = {
-        history: checked('history'),
-        cookies: checked('cookies'),
-        cache: checked('cache'),
-        downloads: checked('downloads')
-      };
-      try {
-        await callPlugin('clearBrowsingData', flags);
-      } catch (error) {
-        toast('Could not clear browsing data');
-        return false;
-      }
-      if (flags.history) history = [];
-      Store.save('history');
-      Store.save('settings');
-      Store.save('bookmarks');
-      Store.save('favicons');
-      updateMenuCounts();
-      renderHistory();
-      if (flags.downloads) loadDownloads();
-      syncNav();
-      toast('Browsing data cleared');
-    }
-  });
-}
-
 function openLicenses() {
   openDialog({
     title: 'Open source licenses',
@@ -2223,6 +2303,8 @@ function attachUiListeners() {
   dom.menuBookmarksBtn.addEventListener('click', openBookmarks);
   dom.menuHistoryBtn.addEventListener('click', openHistory);
   dom.menuDownloadsBtn.addEventListener('click', openDownloads);
+  dom.menuDesktopBtn.addEventListener('click', toggleDesktopSite);
+  dom.menuReadingBtn.addEventListener('click', toggleReadingMode);
   dom.menuSettingsBtn.addEventListener('click', () => openSettingsScreen());
 
   dom.siteInfoCloseBtn.addEventListener('click', closeSiteInfo);
@@ -2230,7 +2312,7 @@ function attachUiListeners() {
 
   dom.historyBackBtn.addEventListener('click', closeHistory);
   dom.historySearch.addEventListener('input', renderHistory);
-  dom.clearHistoryBtn.addEventListener('click', clearHistory);
+  dom.clearHistoryBtn.addEventListener('click', openClearData);
   dom.historyList.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-history-delete]');
     if (deleteButton) {
@@ -2379,6 +2461,10 @@ function attachNativeListeners() {
     }
     dom.startScreen.classList.add('is-hidden');
     setLoading(true);
+    if (readingModeOn) {
+      readingModeOn = false;
+      updateMenuModes();
+    }
     scheduleSessionSave();
   });
 

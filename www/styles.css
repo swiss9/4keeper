@@ -28,8 +28,8 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   --shadow-sheet: 0 -18px 50px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 18px 54px rgba(0, 0, 0, 0.6);
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
 }
 
 [data-theme="light"] {
@@ -1132,6 +1132,16 @@ label.setting-row:active,
 
 .setting-row.is-toggle {
   cursor: pointer;
+}
+
+.setting-row.is-sub {
+  min-height: 44px;
+  padding-left: 36px;
+}
+
+.setting-row.is-sub .setting-label {
+  font-size: 13px;
+  color: var(--text-2);
 }
 
 .setting-icon {

@@ -50,6 +50,9 @@ import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -62,6 +65,17 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String APP_DATA_PREFS = "4keeper_appdata";
     private static final String DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+    private static final String READING_MODE_ENABLE_JS =
+        "(function(){try{var s=document.getElementById('4k-reading-style')||document.createElement('style');"
+        + "s.id='4k-reading-style';"
+        + "s.textContent='aside,[role=\\\"complementary\\\"],[class*=\\\"sidebar\\\"],[id*=\\\"sidebar\\\"],[class*=\\\"side-col\\\"],[class*=\\\"col-sidebar\\\"]{display:none!important}'"
+        + "+';article,main{max-width:100%!important;margin:0 auto!important}';"
+        + "document.head.appendChild(s);}catch(e){}})();";
+
+    private static final String READING_MODE_DISABLE_JS =
+        "(function(){try{var s=document.getElementById('4k-reading-style');if(s&&s.parentNode){s.parentNode.removeChild(s);}}catch(e){}})();";
+
     private static final String[] TRACKER_HOSTS = new String[] {
         "doubleclick.net",
         "googlesyndication.com",
@@ -790,6 +804,78 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
         });
         call.resolve();
+    }
+
+    @PluginMethod
+    public void setDesktopMode(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", true);
+        desktopMode = enabled;
+        persistSettings();
+        getActivity().runOnUiThread(() -> {
+            for (Tab tab : tabs.values()) {
+                tab.view.getSettings().setUserAgentString(enabled ? DESKTOP_USER_AGENT : null);
+            }
+            Tab tab = getActiveTab();
+            if (tab != null) {
+                tab.view.reload();
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void toggleReadingMode(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", true);
+        getActivity().runOnUiThread(() -> {
+            Tab tab = getActiveTab();
+            if (tab == null) {
+                call.resolve();
+                return;
+            }
+            String js = enabled ? READING_MODE_ENABLE_JS : READING_MODE_DISABLE_JS;
+            tab.view.evaluateJavascript(js, null);
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void fetchUrl(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            call.reject("A valid http(s) URL is required.");
+            return;
+        }
+        getBridge().execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setConnectTimeout(4000);
+                connection.setReadTimeout(4000);
+                connection.setRequestProperty("User-Agent", DESKTOP_USER_AGENT);
+                connection.setRequestProperty("Accept", "application/json");
+                int code = connection.getResponseCode();
+                if (code != HttpURLConnection.HTTP_OK) {
+                    call.reject("HTTP " + code);
+                    return;
+                }
+                InputStream in = connection.getInputStream();
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                in.close();
+                String body = out.toString("UTF-8");
+                JSObject result = new JSObject();
+                result.put("body", body);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("Request failed: " + error.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
     }
 
     @PluginMethod

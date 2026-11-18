@@ -28,8 +28,8 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   --shadow-sheet: 0 -18px 50px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 18px 54px rgba(0, 0, 0, 0.6);
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
-  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 [data-theme="light"] {
@@ -825,7 +825,7 @@ select {
 /* ------------------------------------------------------------------ Lists */
 
 .list {
-  padding-bottom: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
 }
 
 .list-group-label {
@@ -1067,7 +1067,7 @@ select {
 
 .settings-root,
 .settings-page {
-  padding: 4px 0 48px;
+  padding: 4px 0 calc(48px + var(--safe-bottom));
 }
 
 .settings-page[hidden] {

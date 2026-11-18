@@ -849,12 +849,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setConnectTimeout(4000);
-                connection.setReadTimeout(4000);
+                connection.setConnectTimeout(3000);
+                connection.setReadTimeout(3000);
+                connection.setInstanceFollowRedirects(true);
                 connection.setRequestProperty("User-Agent", DESKTOP_USER_AGENT);
-                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("Accept", "application/json, text/javascript, */*");
                 int code = connection.getResponseCode();
-                if (code != HttpURLConnection.HTTP_OK) {
+                if (code < 200 || code >= 300) {
                     call.reject("HTTP " + code);
                     return;
                 }

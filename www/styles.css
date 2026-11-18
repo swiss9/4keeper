@@ -117,6 +117,8 @@ button {
   padding: 0;
   cursor: pointer;
   text-align: left;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,
@@ -415,8 +417,13 @@ select {
   align-items: center;
   justify-content: center;
   height: var(--bottom-h);
-  color: var(--muted);
-  transition: color 0.14s ease, opacity 0.14s ease;
+  color: var(--text-2);
+  border-radius: 14px;
+  transition: color 0.14s ease, background-color 0.14s ease, opacity 0.14s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .nav-btn:active {
@@ -425,8 +432,14 @@ select {
 }
 
 .nav-btn:disabled {
-  opacity: 0.28;
+  opacity: 0.34;
   pointer-events: none;
+}
+
+.nav-btn .icon {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.9;
 }
 
 .nav-badge {
@@ -483,7 +496,9 @@ select {
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   box-shadow: var(--shadow-sheet);
   transform: translateY(104%);
-  transition: transform 0.26s cubic-bezier(0.22, 0.8, 0.24, 1);
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.26s cubic-bezier(0.22, 0.8, 0.24, 1), visibility 0s linear 0.26s;
   padding-bottom: var(--safe-bottom);
   overflow: hidden;
 }
@@ -494,10 +509,13 @@ select {
 
 .sheet.open {
   transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition: transform 0.26s cubic-bezier(0.22, 0.8, 0.24, 1), visibility 0s;
 }
 
 .sheet.is-dragging {
-  transition: none;
+  transition: visibility 0s linear 0.26s;
 }
 
 .sheet-handle {

@@ -2483,7 +2483,7 @@ function attachUiListeners() {
   if (window.visualViewport) window.visualViewport.addEventListener('resize', handleResize);
 
   if (typeof ResizeObserver !== 'undefined') {
-    const boundsObserver = new ResizeObserver(scheduleBoundsSync);
+    const boundsObserver = new ResizeObserver(() => mountBrowser());
     boundsObserver.observe(dom.browserContainer);
   }
 }

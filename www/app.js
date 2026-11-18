@@ -500,6 +500,17 @@ function resolveTheme() {
   return settings.theme;
 }
 
+function applyWindowBackground() {
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.setWindowBackground !== 'function') return;
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--bg-elev').trim();
+  if (!color) return;
+  try {
+    Promise.resolve(plugin.setWindowBackground({ color })).catch(() => {});
+  } catch (error) {
+  }
+}
+
 function applyTheme() {
   const theme = resolveTheme();
   document.documentElement.setAttribute('data-theme', theme);
@@ -511,9 +522,14 @@ function applyTheme() {
   const systemBars = plugins && plugins.SystemBars;
   if (systemBars && typeof systemBars.setStyle === 'function') {
     try {
-      Promise.resolve(systemBars.setStyle({ style: theme === 'light' ? 'LIGHT' : 'DARK' })).catch(() => {});
+      Promise.resolve(systemBars.setStyle({ style: theme === 'light' ? 'LIGHT' : 'DARK' }))
+        .catch(() => {})
+        .then(applyWindowBackground);
     } catch (error) {
+      applyWindowBackground();
     }
+  } else {
+    applyWindowBackground();
   }
 }
 

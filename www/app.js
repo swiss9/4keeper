@@ -159,6 +159,7 @@ const dom = {
   menuDesktopBtn: $('menuDesktopBtn'),
   menuDesktopMeta: $('menuDesktopMeta'),
   menuReadingBtn: $('menuReadingBtn'),
+  menuReadingMeta: $('menuReadingMeta'),
   menuSettingsBtn: $('menuSettingsBtn'),
   siteInfoSheet: $('siteInfoSheet'),
   siteInfoBackdrop: $('siteInfoBackdrop'),
@@ -506,6 +507,14 @@ function applyTheme() {
   if (meta) {
     meta.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#09090b');
   }
+  const plugins = window.Capacitor && window.Capacitor.Plugins;
+  const systemBars = plugins && plugins.SystemBars;
+  if (systemBars && typeof systemBars.setStyle === 'function') {
+    try {
+      Promise.resolve(systemBars.setStyle({ style: theme === 'light' ? 'LIGHT' : 'DARK' })).catch(() => {});
+    } catch (error) {
+    }
+  }
 }
 
 function applyDensity() {
@@ -529,7 +538,9 @@ function cookiesLabel() {
 }
 
 function startupLabel() {
-  return settings.startup === 'home' ? 'Open homepage' : 'Restore last session';
+  if (settings.startup === 'home') return 'Open homepage';
+  if (settings.startup === 'newtab') return 'Open new tab';
+  return 'Restore last session';
 }
 
 function engineLabel() {
@@ -614,6 +625,7 @@ function updateMenuModes() {
   if (dom.menuDesktopMeta) dom.menuDesktopMeta.textContent = desktopOn ? 'On' : '';
   if (dom.menuDesktopBtn) dom.menuDesktopBtn.setAttribute('aria-checked', String(desktopOn));
   if (dom.menuReadingBtn) dom.menuReadingBtn.setAttribute('aria-checked', String(readingModeOn));
+  if (dom.menuReadingMeta) dom.menuReadingMeta.textContent = readingModeOn ? 'On' : '';
 }
 
 function syncActiveTabUi() {
@@ -698,7 +710,9 @@ function syncNativeVisibility() {
   const hasPage = !!(tab && isHttpUrl(tab.url));
 
   if (overlay) {
-    if (hasPage) {
+    if (overlays.has('suggestions')) {
+      setNativeVisible(false);
+    } else if (hasPage) {
       showSnapshot().then(() => {
         if (overlays.size > 0) setNativeVisible(false);
       });
@@ -848,10 +862,16 @@ function openMenu() {
 
 function toggleDesktopSite() {
   const next = !settings.desktopMode;
-  updateSetting({ desktopMode: next }, { toastMessage: next ? 'Desktop site on' : 'Desktop site off' });
+  settings = Object.assign({}, settings, { desktopMode: next });
+  Store.save('settings');
   readingModeOn = false;
+  updateMenuModes();
   callPlugin('setDesktopMode', { enabled: next })
-    .catch(() => pushNativeSettings(true));
+    .catch(() => pushNativeSettings(true))
+    .then(() => {
+      updateMenuModes();
+      toast(next ? 'Desktop site on' : 'Desktop site off');
+    });
   closeMenu();
 }
 
@@ -863,6 +883,7 @@ function toggleReadingMode() {
     return;
   }
   readingModeOn = next;
+  updateMenuModes();
   callPlugin('toggleReadingMode', { enabled: next }).catch(() => {});
   toast(next ? 'Reading mode on' : 'Reading mode off');
   closeMenu();
@@ -1038,7 +1059,12 @@ function updateSetting(patch, options) {
   if (opts.toastMessage) toast(opts.toastMessage);
   if (patch.showFullUrl !== undefined) syncActiveTabUi();
   if (patch.suggestions !== undefined && !settings.suggestions) hideSuggestions();
-  if (['suggestions', 'suggestBookmarks', 'suggestHistory'].some((key) => patch[key] !== undefined) && settings.suggestions) {
+  if (
+    ['suggestions', 'suggestBookmarks', 'suggestHistory'].some((key) => patch[key] !== undefined) &&
+    settings.suggestions &&
+    document.activeElement === dom.urlInput &&
+    overlays.size === 0
+  ) {
     scheduleSuggestions();
   }
 }
@@ -1286,6 +1312,7 @@ async function closeAllTabs() {
 /* ------------------------------------------------------------ Suggestions */
 
 function hideSuggestions() {
+  const wasOpen = overlays.has('suggestions') || !dom.suggestions.classList.contains('hidden');
   window.clearTimeout(suggestionTimer);
   suggestionTimer = null;
   suggestionRequest++;
@@ -1295,7 +1322,7 @@ function hideSuggestions() {
   dom.suggestions.classList.add('hidden');
   dom.suggestionsList.innerHTML = '';
   suggestionItems = [];
-  syncNativeVisibility();
+  if (wasOpen) syncNativeVisibility();
 }
 
 function parseSuggestions(data, engine) {
@@ -1364,7 +1391,7 @@ async function fetchRemoteSuggestions(url) {
   if (!body) {
     try {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeout = window.setTimeout(() => controller && controller.abort(), 3000);
+      const timeout = window.setTimeout(() => controller && controller.abort(), 2000);
       const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
       window.clearTimeout(timeout);
       if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -1383,8 +1410,10 @@ async function fetchRemoteSuggestions(url) {
 async function fetchSuggestions(query) {
   const engine = getEngine();
   const local = localSuggestions(query);
-  showSuggestionItems(local);
-  if (!engine.suggest) return;
+  const urlLike = isProbablyUrl(query);
+  const searchItem = { text: query, hint: urlLike ? 'Open' : 'Search' };
+  showSuggestionItems(local.concat(searchItem));
+  if (!engine.suggest || urlLike) return;
 
   const requestId = ++suggestionRequest;
   const data = await fetchRemoteSuggestions(engine.suggest(query));
@@ -1392,12 +1421,14 @@ async function fetchSuggestions(query) {
 
   const merged = local.slice();
   const seen = new Set(merged.map((item) => item.text.toLowerCase()));
+  seen.add(query.toLowerCase());
   parseSuggestions(data, settings.searchEngine).forEach((text) => {
     const key = String(text).toLowerCase();
     if (!text || seen.has(key)) return;
     seen.add(key);
     merged.push({ text: String(text), hint: '' });
   });
+  merged.push(searchItem);
   showSuggestionItems(merged.slice(0, 8));
 }
 
@@ -1406,7 +1437,7 @@ function scheduleSuggestions() {
   suggestionRequest++;
   const query = dom.urlInput.value.trim();
   dom.clearUrlBtn.classList.toggle('hidden', !query);
-  if (!settings.suggestions || !query || isProbablyUrl(query)) {
+  if (!settings.suggestions || !query) {
     hideSuggestions();
     return;
   }
@@ -1462,7 +1493,6 @@ function clearHistoryData(range) {
   Store.save('history');
   renderHistory();
   updateMenuCounts();
-  if (overlays.has('history')) renderHistory();
 }
 
 function openClearData() {
@@ -1470,7 +1500,6 @@ function openClearData() {
     title: 'Delete browsing data',
     message: 'Choose a time range and what to remove. Bookmarks, settings and downloads stay.',
     confirmLabel: 'Delete data',
-    destructive: true,
     body: (body) => {
       const label = el('label', 'dialog-select-label');
       label.setAttribute('for', 'clearDataRange');
@@ -1483,6 +1512,7 @@ function openClearData() {
         option.value = value;
         select.appendChild(option);
       });
+      select.value = 'all';
 
       const wrap = el('div', 'dialog-options');
       [
@@ -1518,16 +1548,18 @@ function openClearData() {
         return false;
       }
       if (flags.history) clearHistoryData(range);
-      if (flags.cookies || flags.cache) {
+      const nativeHistory = flags.history && range === 'all';
+      if (flags.cookies || flags.cache || nativeHistory) {
         try {
           await callPlugin('clearBrowsingData', {
-            history: false,
+            history: nativeHistory,
             cookies: flags.cookies,
             cache: flags.cache,
             downloads: false
           });
         } catch (error) {
           toast('Could not clear some browsing data');
+          return false;
         }
       }
       toast('Browsing data deleted');
@@ -1545,7 +1577,7 @@ function renderHistory() {
   dom.historyCount.textContent = history.length
     ? `${history.length} ${history.length === 1 ? 'entry' : 'entries'}`
     : '';
-  dom.clearHistoryBtn.classList.toggle('hidden', history.length === 0);
+  dom.clearHistoryBtn.classList.remove('hidden');
 
   if (!items.length) {
     dom.historyList.innerHTML = `
@@ -2109,7 +2141,8 @@ function handleSettingsAction(action) {
     case 'startup':
       openChoice('On startup', [
         { value: 'restore', label: 'Restore last session', desc: 'Reopen recent tabs' },
-        { value: 'home', label: 'Open homepage', desc: 'Start fresh every time' }
+        { value: 'home', label: 'Open homepage', desc: 'Start on your homepage' },
+        { value: 'newtab', label: 'Open new tab', desc: 'Start on a blank tab' }
       ], settings.startup, (value) => updateSetting({ startup: value }, { rerender: true }));
       break;
     case 'cookies':
@@ -2201,7 +2234,6 @@ function attachUiListeners() {
     window.setTimeout(() => {
       if (document.activeElement === dom.urlInput) dom.urlInput.select();
     }, 0);
-    scheduleSuggestions();
   });
   dom.urlInput.addEventListener('input', scheduleSuggestions);
   dom.urlInput.addEventListener('keydown', (event) => {
@@ -2214,12 +2246,6 @@ function attachUiListeners() {
       dom.urlInput.blur();
     }
   });
-  dom.urlInput.addEventListener('blur', () => {
-    window.setTimeout(() => {
-      if (document.activeElement !== dom.urlInput) hideSuggestions();
-    }, 160);
-  });
-
   dom.clearUrlBtn.addEventListener('click', () => {
     dom.urlInput.value = '';
     dom.clearUrlBtn.classList.add('hidden');
@@ -2258,6 +2284,14 @@ function attachUiListeners() {
     if (!item) return;
     navigate(item.url || item.text);
   });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!overlays.has('suggestions')) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#suggestions') || target.closest('#urlInput') || target.closest('#clearUrlBtn')) return;
+    hideSuggestions();
+  }, true);
 
   dom.closeTabSheetBtn.addEventListener('click', closeTabSheet);
   dom.tabSheetBackdrop.addEventListener('click', closeTabSheet);
@@ -2430,6 +2464,13 @@ function attachUiListeners() {
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', handleResize);
+
+  if (typeof ResizeObserver !== 'undefined') {
+    const boundsObserver = new ResizeObserver(() => {
+      mountBrowser();
+    });
+    boundsObserver.observe(dom.browserContainer);
+  }
 }
 
 function attachNativeListeners() {
@@ -2620,6 +2661,18 @@ async function exitApp() {
 /* ------------------------------------------------------------------- Boot */
 
 async function restoreSession() {
+  if (settings.startup === 'newtab') {
+    try {
+      await callPlugin('createTab', { url: '', activate: true });
+    } catch (error) {
+      await createTabWithUrl(getHomePage(), true);
+      return;
+    }
+    await refreshTabs();
+    syncActiveTabUi();
+    return;
+  }
+
   const saved = Array.isArray(session.tabs) ? session.tabs.filter((tab) => isHttpUrl(tab.url)).slice(0, 8) : [];
   if (settings.startup === 'home' || !saved.length) {
     await createTabWithUrl(getHomePage(), true);
@@ -2648,8 +2701,8 @@ async function restoreSession() {
 }
 
 async function boot() {
-  for (let attempt = 0; attempt < 20 && !getPlugin(); attempt++) {
-    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  for (let attempt = 0; attempt < 40 && !getPlugin(); attempt++) {
+    await new Promise((resolve) => window.setTimeout(resolve, 25));
   }
   applyTheme();
   applyDensity();

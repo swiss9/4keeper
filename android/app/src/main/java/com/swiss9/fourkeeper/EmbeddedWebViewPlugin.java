@@ -76,6 +76,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String READING_MODE_DISABLE_JS =
         "(function(){try{var s=document.getElementById('4k-reading-style');if(s&&s.parentNode){s.parentNode.removeChild(s);}}catch(e){}})();";
 
+    private static final String TAP_STYLE_JS =
+        "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
+
     private static final String[] TRACKER_HOSTS = new String[] {
         "doubleclick.net",
         "googlesyndication.com",
@@ -267,6 +270,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         int id = nextTabId++;
         WebView view = new WebView(getContext());
         view.setBackgroundColor(Color.parseColor("#09090b"));
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
+        view.setOverScrollMode(View.OVER_SCROLL_NEVER);
         applySettingsTo(view);
         view.setWebViewClient(new TabClient(id));
         view.setWebChromeClient(new TabChromeClient(id));
@@ -411,6 +417,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 if (url != null && !"about:blank".equals(url)) tab.url = url;
                 tab.title = view.getTitle() == null ? tab.title : view.getTitle();
             }
+            view.evaluateJavascript(TAP_STYLE_JS, null);
             JSObject data = tabState(tab);
             data.put("tabId", tabId);
             data.put("canGoBack", view.canGoBack());

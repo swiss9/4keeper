@@ -2469,22 +2469,21 @@ function attachUiListeners() {
     setSecurityIcon(currentUrl);
   });
 
-  let resizeTimer = null;
-  const handleResize = () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      lastBoundsKey = '';
+  let boundsTimer = null;
+  const scheduleBoundsSync = () => {
+    window.clearTimeout(boundsTimer);
+    boundsTimer = window.setTimeout(() => {
+      boundsTimer = null;
       if (overlays.size === 0) mountBrowser();
-    }, 160);
+    }, 90);
   };
+  const handleResize = () => scheduleBoundsSync();
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', handleResize);
 
   if (typeof ResizeObserver !== 'undefined') {
-    const boundsObserver = new ResizeObserver(() => {
-      mountBrowser();
-    });
+    const boundsObserver = new ResizeObserver(scheduleBoundsSync);
     boundsObserver.observe(dom.browserContainer);
   }
 }

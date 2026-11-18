@@ -718,6 +718,22 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setWindowBackground(PluginCall call) {
+        String value = call.getString("color", "");
+        int color;
+        try {
+            color = Color.parseColor(value);
+        } catch (IllegalArgumentException error) {
+            call.reject("Invalid color.");
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            getActivity().getWindow().getDecorView().setBackgroundColor(color);
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
     public void captureScreenshot(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();

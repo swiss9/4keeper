@@ -53,7 +53,13 @@ const DEFAULT_SETTINGS = {
   desktopMode: false,
   pinchZoom: true,
   zoomControls: false,
-  downloadNotifications: true
+  downloadNotifications: true,
+  downloadLocation: '',
+  downloadLocationLabel: '',
+  askDownloadLocation: false,
+  autoOpenPdf: false,
+  autoOpenDownload: false,
+  parallelDownloads: true
 };
 
 const ICONS = {
@@ -94,8 +100,11 @@ let activeTabId = -1;
 let currentUrl = '';
 let currentTitle = '';
 let loading = false;
+let progressDoneTimer = null;
 let appInfo = null;
 let downloadsCache = [];
+let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
+let downloadsFilter = 'all';
 let currentSettingsSection = null;
 let navCanBack = false;
 let navCanForward = false;
@@ -178,6 +187,7 @@ const dom = {
   bookmarksCount: $('bookmarksCount'),
   downloadsScreen: $('downloadsScreen'),
   downloadsBackBtn: $('downloadsBackBtn'),
+  downloadsSettingsBtn: $('downloadsSettingsBtn'),
   downloadsRefreshBtn: $('downloadsRefreshBtn'),
   downloadsList: $('downloadsList'),
   settingsScreen: $('settingsScreen'),
@@ -588,7 +598,9 @@ function setLoading(isLoading) {
   window.clearTimeout(loadingTimer);
 
   if (next) {
+    window.clearTimeout(progressDoneTimer);
     if (!was) {
+      dom.progressBar.style.transition = '';
       dom.progressBar.style.width = '6%';
       dom.progressBar.style.opacity = '0.9';
     }
@@ -598,8 +610,14 @@ function setLoading(isLoading) {
   } else if (was) {
     dom.progressBar.style.width = '100%';
     window.setTimeout(() => {
-      if (!loading) dom.progressBar.style.width = '0';
-    }, 240);
+      if (loading) return;
+      dom.progressBar.style.transition = 'none';
+      dom.progressBar.style.width = '0';
+      dom.progressBar.style.opacity = '0';
+      window.requestAnimationFrame(() => {
+        dom.progressBar.style.transition = '';
+      });
+    }, 280);
   }
 
   dom.reloadIcon.classList.toggle('hidden', next);
@@ -668,6 +686,15 @@ function updateTabMeta(tabId, patch) {
   if (typeof patch.canGoForward === 'boolean') tab.canGoForward = patch.canGoForward;
 }
 
+function adoptNativeActiveTab(data) {
+  if (!data || typeof data.activeTabId !== 'number') return;
+  if (data.activeTabId === activeTabId) return;
+  activeTabId = data.activeTabId;
+  window.setTimeout(() => {
+    refreshTabs().catch(() => {});
+  }, 0);
+}
+
 /* ---------------------------------------------------------- Native layer */
 
 function setNativeVisible(visible) {
@@ -682,68 +709,72 @@ function setNativeVisible(visible) {
   }
 }
 
-let snapshotPromise = null;
-let snapshotVisible = false;
-let snapshotToken = 0;
+let uiOverlayState = null;
+let nativeVisibleState = null;
+let pageBehindState = false;
+let pageBehindToken = 0;
 
-function showSnapshot() {
-  if (snapshotVisible) return Promise.resolve();
-  if (snapshotPromise) return snapshotPromise;
+function setUiOverlay(active) {
   const plugin = getPlugin();
-  const tab = activeTab();
-  if (!plugin || !tab || !isHttpUrl(tab.url) || typeof plugin.captureScreenshot !== 'function') {
+  if (!plugin || typeof plugin.setUiOverlay !== 'function') return Promise.resolve();
+  if (uiOverlayState === active) return Promise.resolve();
+  uiOverlayState = active;
+  try {
+    return Promise.resolve(plugin.setUiOverlay({ active })).catch(() => {
+      uiOverlayState = null;
+    });
+  } catch (error) {
+    uiOverlayState = null;
     return Promise.resolve();
   }
-  const token = snapshotToken;
-  snapshotPromise = Promise.resolve(plugin.captureScreenshot({}))
-    .then((result) => {
-      if (token !== snapshotToken || overlays.size === 0) return;
-      const data = result && result.data;
-      if (!data) return;
-      dom.webviewSnapshot.src = data.indexOf('data:') === 0 ? data : 'data:image/png;base64,' + data;
-      dom.webviewSnapshot.classList.remove('hidden');
-      snapshotVisible = true;
-    })
-    .catch(() => {})
-    .finally(() => {
-      snapshotPromise = null;
-    });
-  return snapshotPromise;
 }
 
-function hideSnapshot() {
-  snapshotToken++;
-  snapshotPromise = null;
-  snapshotVisible = false;
-  dom.webviewSnapshot.classList.add('hidden');
-  dom.webviewSnapshot.removeAttribute('src');
+function applyPageBehind(active) {
+  const root = document.documentElement;
+  if (active) {
+    pageBehindToken++;
+    pageBehindState = true;
+    document.body.classList.add('page-behind');
+    root.classList.add('page-behind');
+    setUiOverlay(true);
+    return;
+  }
+  if (!pageBehindState) {
+    document.body.classList.remove('page-behind');
+    root.classList.remove('page-behind');
+    setUiOverlay(false);
+    return;
+  }
+  const token = ++pageBehindToken;
+  setUiOverlay(false).finally(() => {
+    if (token !== pageBehindToken) return;
+    pageBehindState = false;
+    document.body.classList.remove('page-behind');
+    root.classList.remove('page-behind');
+  });
 }
 
 function syncNativeVisibility() {
   const overlay = overlays.size > 0;
-  document.body.classList.toggle('overlay-open', overlay);
   const tab = activeTab();
   const hasPage = !!(tab && isHttpUrl(tab.url));
+  const pageBehind = overlay && hasPage;
 
-  if (overlay) {
-    if (overlays.has('suggestions')) {
-      setNativeVisible(false);
-    } else if (hasPage) {
-      showSnapshot().then(() => {
-        if (overlays.size > 0) setNativeVisible(false);
-      });
-    } else {
-      setNativeVisible(false);
-    }
-  } else {
-    hideSnapshot();
+  document.body.classList.toggle('overlay-open', overlay);
+
+  if (nativeVisibleState !== hasPage) {
+    nativeVisibleState = hasPage;
     setNativeVisible(hasPage);
+  }
+  applyPageBehind(pageBehind);
+
+  dom.startScreen.classList.toggle('is-hidden', hasPage || overlay);
+
+  if (!overlay) {
     window.setTimeout(() => {
       if (overlays.size === 0) mountBrowser();
     }, 80);
   }
-
-  dom.startScreen.classList.toggle('is-hidden', hasPage || overlay);
 }
 
 /* -------------------------------------------------------------- Shells */
@@ -873,6 +904,7 @@ function openMenu() {
   updateMenuCounts();
   updateMenuBookmark();
   updateMenuModes();
+  refreshReadingState();
   syncNativeVisibility();
 }
 
@@ -891,18 +923,51 @@ function toggleDesktopSite() {
   closeMenu();
 }
 
+function refreshReadingState() {
+  if (!isHttpUrl(currentUrl)) {
+    if (readingModeOn) {
+      readingModeOn = false;
+      updateMenuModes();
+    }
+    return;
+  }
+  callPlugin('getReadingMode')
+    .then((result) => {
+      const active = !!(result && result.enabled);
+      if (active !== readingModeOn) {
+        readingModeOn = active;
+        updateMenuModes();
+      }
+    })
+    .catch(() => {});
+}
+
 function toggleReadingMode() {
-  const next = !readingModeOn;
   if (!isHttpUrl(currentUrl)) {
     toast('Open a page to use reading mode');
     closeMenu();
     return;
   }
+  const next = !readingModeOn;
   readingModeOn = next;
   updateMenuModes();
-  callPlugin('toggleReadingMode', { enabled: next }).catch(() => {});
-  toast(next ? 'Reading mode on' : 'Reading mode off');
   closeMenu();
+  callPlugin('toggleReadingMode', { enabled: next })
+    .then((result) => {
+      const applied = !!(result && result.applied);
+      if (next && !applied) {
+        readingModeOn = false;
+        updateMenuModes();
+        toast('Reading mode is not available for this page');
+      } else {
+        toast(next ? 'Reading mode on' : 'Reading mode off');
+      }
+    })
+    .catch(() => {
+      readingModeOn = !next;
+      updateMenuModes();
+      toast('Could not change reading mode');
+    });
 }
 
 function closeMenu() {
@@ -1038,7 +1103,12 @@ function pushNativeSettings(reload) {
     trackingProtection: !!settings.trackingProtection,
     zoomControls: !!settings.zoomControls,
     pinchZoom: !!settings.pinchZoom,
-    downloadNotifications: !!settings.downloadNotifications
+    downloadNotifications: !!settings.downloadNotifications,
+    downloadLocation: settings.downloadLocation || '',
+    askDownloadLocation: !!settings.askDownloadLocation,
+    autoOpenPdf: !!settings.autoOpenPdf,
+    autoOpenDownload: !!settings.autoOpenDownload,
+    parallelDownloads: !!settings.parallelDownloads
   };
   return Promise.resolve(plugin.applySettings(payload))
     .then(() => {
@@ -1059,7 +1129,12 @@ const NATIVE_SETTING_KEYS = [
   'trackingProtection',
   'zoomControls',
   'pinchZoom',
-  'downloadNotifications'
+  'downloadNotifications',
+  'downloadLocation',
+  'askDownloadLocation',
+  'autoOpenPdf',
+  'autoOpenDownload',
+  'parallelDownloads'
 ];
 
 function updateSetting(patch, options) {
@@ -1221,6 +1296,10 @@ async function navigate(raw) {
   closeTabSheet();
   closeMenu();
   closeSiteInfo();
+  if (readingModeOn) {
+    readingModeOn = false;
+    updateMenuModes();
+  }
 
   await mountBrowser();
   const tab = activeTab();
@@ -1743,31 +1822,72 @@ function downloadStatus(download) {
   return 'Saved';
 }
 
+function isImageDownload(item) {
+  const mime = String((item && item.mime) || '').toLowerCase();
+  if (mime.indexOf('image/') === 0) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)$/i.test(String((item && item.filename) || ''));
+}
+
+function downloadFilterMatch(item) {
+  if (downloadsFilter === 'images') return isImageDownload(item);
+  if (downloadsFilter === 'other') return !isImageDownload(item);
+  return true;
+}
+
+function downloadsToolbarMarkup() {
+  const counts = { all: downloadsCache.length, images: 0, other: 0 };
+  downloadsCache.forEach((item) => {
+    if (isImageDownload(item)) counts.images += 1;
+    else counts.other += 1;
+  });
+  const chip = (value, label, count) => `
+    <button class="filter-chip${downloadsFilter === value ? ' is-active' : ''}" type="button" data-download-filter="${value}">
+      ${label}${count ? `<span class="filter-count">${count}</span>` : ''}
+    </button>`;
+  const usage = downloadsUsage.totalBytes
+    ? `Using ${formatBytes(downloadsUsage.usedBytes)} of ${formatBytes(downloadsUsage.totalBytes)}`
+    : '';
+  return `
+    <div class="downloads-toolbar">
+      ${usage ? `<div class="downloads-storage">${escapeHtml(usage)}</div>` : ''}
+      <div class="filter-chips">
+        ${chip('all', 'All', counts.all)}
+        ${chip('images', 'Images', counts.images)}
+        ${chip('other', 'Other', counts.other)}
+      </div>
+    </div>`;
+}
+
 function renderDownloads() {
-  if (!downloadsCache.length) {
-    dom.downloadsList.innerHTML = `
-      <div class="empty">
+  const items = downloadsCache.filter(downloadFilterMatch);
+  const emptyMarkup = downloadsCache.length
+    ? `<div class="empty">
+        ${svgIcon('download', 'empty-icon')}
+        <div class="empty-title">No matching downloads</div>
+        <div class="empty-text">Try another filter.</div>
+      </div>`
+    : `<div class="empty">
         ${svgIcon('download', 'empty-icon')}
         <div class="empty-title">No downloads</div>
-        <div class="empty-text">Files you download are saved in this app's Downloads folder.</div>
+        <div class="empty-text">Files you download are saved to your selected download folder.</div>
       </div>`;
-    return;
-  }
 
-  dom.downloadsList.innerHTML = downloadsCache
-    .map((item) => {
-      const status = String(item.status || '').toLowerCase();
-      const failed = status === 'failed' || status === 'unknown';
-      const missing = item.exists === false;
-      return `
+  dom.downloadsList.innerHTML = downloadsToolbarMarkup() + (items.length
+    ? items
+      .map((item) => {
+        const status = String(item.status || '').toLowerCase();
+        const failed = status === 'failed' || status === 'unknown';
+        const missing = item.exists === false;
+        const done = status === 'successful' || status === 'completed';
+        return `
         <div class="list-item download-item">
-          <span class="favicon">${svgIcon('download', 'icon icon-sm')}</span>
+          <span class="favicon">${isImageDownload(item) ? svgIcon('external', 'icon icon-sm') : svgIcon('download', 'icon icon-sm')}</span>
           <div class="list-text">
             <div class="list-title">${escapeHtml(item.filename || 'Download')}</div>
-            <div class="list-subtitle">${escapeHtml(downloadStatus(item))}${item.mime ? ' · ' + escapeHtml(String(item.mime).split('/').pop()) : ''}</div>
+            <div class="list-subtitle" data-download-status="${escapeHtml(item.id)}">${escapeHtml(downloadStatus(item))}${item.mime ? ' · ' + escapeHtml(String(item.mime).split('/').pop()) : ''}</div>
           </div>
           <div class="list-actions">
-            <button class="icon-btn icon-btn-sm" type="button" data-download-open="${escapeHtml(item.id)}" aria-label="Open download"${failed || missing ? ' disabled' : ''}>
+            <button class="icon-btn icon-btn-sm" type="button" data-download-open="${escapeHtml(item.id)}" aria-label="Open download"${!done || failed || missing ? ' disabled' : ''}>
               ${svgIcon('external', 'icon icon-xs')}
             </button>
             <button class="icon-btn icon-btn-sm" type="button" data-download-remove="${escapeHtml(item.id)}" aria-label="Remove download">
@@ -1775,18 +1895,37 @@ function renderDownloads() {
             </button>
           </div>
         </div>`;
-    })
-    .join('');
+      })
+      .join('')
+    : emptyMarkup);
 }
 
 async function loadDownloads() {
   try {
     const result = await callPlugin('getDownloads');
     downloadsCache = Array.isArray(result && result.items) ? result.items : [];
+    downloadsUsage = {
+      usedBytes: Number(result && result.usedBytes) || 0,
+      totalBytes: Number(result && result.totalBytes) || 0
+    };
   } catch (error) {
     downloadsCache = [];
+    downloadsUsage = { usedBytes: 0, totalBytes: 0 };
   }
   renderDownloads();
+}
+
+function updateDownloadProgress(data) {
+  if (!data || typeof data.id !== 'number') return;
+  const item = downloadsCache.find((entry) => Number(entry.id) === data.id);
+  if (!item) return;
+  item.bytes = Number(data.bytes) || 0;
+  item.totalBytes = Number(data.totalBytes) || 0;
+  if (data.status) item.status = data.status;
+  const row = dom.downloadsList.querySelector('[data-download-status="' + data.id + '"]');
+  if (row) {
+    row.textContent = downloadStatus(item) + (item.mime ? ' · ' + String(item.mime).split('/').pop() : '');
+  }
 }
 
 function openDownloads() {
@@ -2007,14 +2146,26 @@ function settingsPageSite() {
     `<div class="setting-note">Content settings apply to every tab and reload open pages when changed.</div>`;
 }
 
+function downloadLocationLabel() {
+  if (settings.downloadLocation) return settings.downloadLocationLabel || 'Selected folder';
+  return 'App downloads folder';
+}
+
 function settingsPageDownloads() {
-  return settingSection('Notifications', `
-      ${settingRowToggle('downloadNotifications', 'Download notifications', 'Show progress and completion notices')}
+  return settingSection('Location', `
+      ${settingRowButton('download', 'Download location', 'Where downloaded files are saved', downloadLocationLabel(), 'downloadFolder')}
+      ${settingRowToggle('askDownloadLocation', 'Ask where to save files', 'Choose a folder for every download')}
+    `) +
+    settingSection('Behavior', `
+      ${settingRowToggle('autoOpenPdf', 'Automatically open PDFs', 'Open PDFs as soon as they finish')}
+      ${settingRowToggle('autoOpenDownload', 'Automatically open when possible', 'Open completed files with a compatible app')}
+      ${settingRowToggle('downloadNotifications', 'Show download progress notifications', 'Show progress and completion notices')}
+      ${settingRowToggle('parallelDownloads', 'Parallel downloading', 'Download multiple files at the same time')}
     `) +
     settingSection('Files', `
       ${settingRowAction('download', 'View downloads', 'Open the downloads list', 'openDownloads')}
     `) +
-    `<div class="setting-note">Android does not allow 4Keeper to become the system default browser, so downloads use the app's own folder.</div>`;
+    `<div class="setting-note">Choose any folder for saved files. 4Keeper keeps access to your selection through Android's document picker.</div>`;
 }
 
 function settingsPageData() {
@@ -2182,6 +2333,29 @@ function handleSettingsAction(action) {
       break;
     case 'openDownloads':
       openDownloads();
+      break;
+    case 'downloadFolder':
+      openChoice('Download location', [
+        { value: 'app', label: 'App downloads folder', desc: 'Saved inside 4Keeper storage' },
+        { value: 'choose', label: 'Choose folder…', desc: settings.downloadLocation ? settings.downloadLocationLabel : 'Use the system folder picker' }
+      ], settings.downloadLocation ? 'choose' : 'app', (value) => {
+        if (value === 'app') {
+          updateSetting({ downloadLocation: '', downloadLocationLabel: '' }, { rerender: true, toastMessage: 'Downloads use the app folder' });
+          return;
+        }
+        callPlugin('chooseDownloadFolder')
+          .then((result) => {
+            if (!result || !result.uri) {
+              toast('No folder selected');
+              return;
+            }
+            updateSetting({
+              downloadLocation: result.uri,
+              downloadLocationLabel: result.label || 'Selected folder'
+            }, { rerender: true, toastMessage: 'Download folder updated' });
+          })
+          .catch(() => toast('Folder not changed'));
+      });
       break;
     case 'licenses':
       openLicenses();
@@ -2398,8 +2572,18 @@ function attachUiListeners() {
   });
 
   dom.downloadsBackBtn.addEventListener('click', closeDownloads);
+  dom.downloadsSettingsBtn.addEventListener('click', () => {
+    closeDownloads();
+    openSettingsScreen('downloads');
+  });
   dom.downloadsRefreshBtn.addEventListener('click', loadDownloads);
   dom.downloadsList.addEventListener('click', (event) => {
+    const filterButton = event.target.closest('[data-download-filter]');
+    if (filterButton) {
+      downloadsFilter = filterButton.getAttribute('data-download-filter') || 'all';
+      renderDownloads();
+      return;
+    }
     const openButton = event.target.closest('[data-download-open]');
     if (openButton) {
       openDownloadFile(Number(openButton.getAttribute('data-download-open')));
@@ -2483,7 +2667,9 @@ function attachUiListeners() {
   if (window.visualViewport) window.visualViewport.addEventListener('resize', handleResize);
 
   if (typeof ResizeObserver !== 'undefined') {
-    const boundsObserver = new ResizeObserver(() => mountBrowser());
+    const boundsObserver = new ResizeObserver(() => {
+      if (overlays.size === 0) mountBrowser();
+    });
     boundsObserver.observe(dom.browserContainer);
   }
 }
@@ -2504,6 +2690,7 @@ function attachNativeListeners() {
 
   listen('pageStarted', (data) => {
     if (!data || typeof data.tabId !== 'number') return;
+    adoptNativeActiveTab(data);
     updateTabMeta(data.tabId, { url: data.url });
     if (!isActive(data)) {
       if (overlays.has('tabs')) renderTabs();
@@ -2526,6 +2713,7 @@ function attachNativeListeners() {
 
   listen('pageLoaded', (data) => {
     if (!data || typeof data.tabId !== 'number') return;
+    adoptNativeActiveTab(data);
     updateTabMeta(data.tabId, {
       url: data.url,
       title: data.title,
@@ -2556,13 +2744,25 @@ function attachNativeListeners() {
   });
 
   listen('loadProgress', (data) => {
-    if (!isActive(data) || !data) return;
+    if (!data) return;
+    adoptNativeActiveTab(data);
+    if (!isActive(data)) return;
     const progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
-    if (progress < 100) dom.progressBar.style.width = progress + '%';
+    if (!loading) return;
+    if (progress < 100) {
+      dom.progressBar.style.width = progress + '%';
+    } else {
+      dom.progressBar.style.width = '100%';
+      window.clearTimeout(progressDoneTimer);
+      progressDoneTimer = window.setTimeout(() => {
+        if (loading && isActive(data)) setLoading(false);
+      }, 700);
+    }
   });
 
   listen('titleChanged', (data) => {
     if (!data || typeof data.tabId !== 'number') return;
+    adoptNativeActiveTab(data);
     updateTabMeta(data.tabId, { title: data.title });
     if (isActive(data)) {
       currentTitle = data.title || '';
@@ -2590,6 +2790,7 @@ function attachNativeListeners() {
 
   listen('pageError', (data) => {
     if (!data) return;
+    adoptNativeActiveTab(data);
     if (isActive(data)) {
       setLoading(false);
       if (data.message) toast(String(data.message));
@@ -2612,6 +2813,14 @@ function attachNativeListeners() {
     if (data && data.filename) toast('Downloading ' + data.filename);
     if (overlays.has('downloads')) loadDownloads();
   });
+
+  listen('downloadProgress', (data) => {
+    if (overlays.has('downloads')) updateDownloadProgress(data);
+  });
+
+  listen('downloadFinished', () => {
+    if (overlays.has('downloads')) loadDownloads();
+  });
 }
 
 /* ------------------------------------------------------------------- Back */
@@ -2625,6 +2834,10 @@ function handleBack() {
     closeChoice();
     return true;
   }
+  if (overlays.has('downloads')) {
+    closeDownloads();
+    return true;
+  }
   if (overlays.has('settings')) {
     closeSettingsScreen();
     return true;
@@ -2635,10 +2848,6 @@ function handleBack() {
   }
   if (overlays.has('bookmarks')) {
     closeBookmarks();
-    return true;
-  }
-  if (overlays.has('downloads')) {
-    closeDownloads();
     return true;
   }
   if (overlays.has('tabs')) {
@@ -2655,6 +2864,12 @@ function handleBack() {
   }
   if (overlays.has('suggestions')) {
     hideSuggestions();
+    return true;
+  }
+  if (readingModeOn) {
+    readingModeOn = false;
+    updateMenuModes();
+    callPlugin('toggleReadingMode', { enabled: false }).catch(() => {});
     return true;
   }
   if (navCanBack) {
@@ -2758,6 +2973,10 @@ async function boot() {
         return;
       }
       lastBoundsKey = '';
+      uiOverlayState = null;
+      nativeVisibleState = null;
+      pageBehindState = false;
+      syncNativeVisibility();
       window.setTimeout(() => {
         if (overlays.size === 0) mountBrowser(true);
       }, 160);
@@ -2768,6 +2987,10 @@ async function boot() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       lastBoundsKey = '';
+      uiOverlayState = null;
+      nativeVisibleState = null;
+      pageBehindState = false;
+      syncNativeVisibility();
       window.setTimeout(() => {
         if (overlays.size === 0) mountBrowser();
       }, 160);

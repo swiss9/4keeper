@@ -2059,3 +2059,385 @@ html.page-behind .browser {
   font-size: 10px;
   opacity: 0.7;
 }
+
+/* ------------------------------------------------ Pick lists (dialogs) */
+
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.pick-list.scroll {
+  max-height: 244px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+.pick-row:last-child {
+  border-bottom: 0;
+}
+
+.pick-row:active {
+  background: var(--surface-2);
+}
+
+.pick-row.is-selected {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.pick-radio {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  transition: border-color 0.13s ease;
+}
+
+.pick-radio::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-fg);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.13s ease, transform 0.13s ease;
+}
+
+.pick-row.is-selected .pick-radio {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pick-row.is-selected .pick-radio::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pick-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pick-label {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.pick-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.dialog-field-label {
+  display: block;
+  margin: 16px 0 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dialog-field-label:first-child {
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------- Bookmark folders */
+
+.folder-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 10px 8px 18px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.folder-head .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.folder-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.folder-head-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.folder-head-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.list-item.is-in-folder {
+  padding-left: 30px;
+}
+
+.folder-empty {
+  padding: 12px 18px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------ Tab sections / groups */
+
+.tab-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 2px 2px 12px;
+}
+
+.tab-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+
+.tab-section-head .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.tab-section-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tab-section-head .btn-sm {
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.tab-grid.is-pinned .tab-preview {
+  height: 62px;
+  border-bottom-color: transparent;
+}
+
+.tab-grid.is-pinned .tab-monogram {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.tab-grid.is-pinned .tab-meta {
+  padding: 6px 10px 9px;
+}
+
+.tab-grid.is-pinned .tab-title {
+  font-size: 12px;
+}
+
+.tab-grid.is-pinned .tab-host {
+  display: none;
+}
+
+.tab-pin {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(9, 9, 11, 0.55);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+[data-theme="light"] .tab-pin {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tab-pin .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.tab-pin.is-pinned {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.tab-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg);
+  color: transparent;
+}
+
+.tab-check .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.tab-card.is-selecting {
+  cursor: pointer;
+}
+
+.tab-card.is-selected {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.tab-card.is-selected .tab-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.group-preview {
+  height: 96px;
+}
+
+.group-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.group-icon .icon {
+  width: 21px;
+  height: 21px;
+}
+
+.group-mini-monogram {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.group-mini-monogram img {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.tab-group-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 10px;
+}
+
+.tab-group-view .tab-section-label {
+  color: var(--text);
+}
+
+.tab-group-view .icon-btn-sm {
+  color: var(--text-2);
+}
+
+.tab-select-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px -2px -2px;
+  padding: 10px 4px calc(10px + var(--safe-bottom));
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+}
+
+.tab-select-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.btn-sm {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  border-radius: var(--radius-xs);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+}

@@ -175,6 +175,10 @@ let appInfo = null;
 let downloadsCache = [];
 let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
 let downloadsFilter = 'all';
+let tabMedia = {};
+let tabDownloadIndex = {};
+let mediaToastAt = 0;
+let mediaToastTabId = -1;
 let currentSettingsSection = null;
 let navCanBack = false;
 let navCanForward = false;
@@ -224,6 +228,10 @@ const dom = {
   homeBtn: $('homeBtn'),
   tabsBtn: $('tabsBtn'),
   tabsBadge: $('tabsBadge'),
+  downloadsBtn: $('downloadsBtn'),
+  downloadsMediaDot: $('downloadsMediaDot'),
+  tabDownloadsBtn: $('tabDownloadsBtn'),
+  tabDownloadsMediaDot: $('tabDownloadsMediaDot'),
   menuBtn: $('menuBtn'),
   tabSheet: $('tabSheet'),
   tabSheetBackdrop: $('tabSheetBackdrop'),
@@ -893,6 +901,7 @@ function syncActiveTabUi() {
   setSecurityIcon(currentUrl);
   dom.startScreen.classList.toggle('is-hidden', !!currentUrl || overlays.size > 0);
   updateMenuBookmark();
+  updateDownloadsIndicator();
   if (overlays.has('siteInfo')) renderSiteInfo();
 }
 
@@ -1105,6 +1114,7 @@ function openTabSheet() {
   dom.tabSheetBackdrop.classList.add('open');
   closeOtherSheets('tabs');
   renderTabs();
+  refreshTabMedia();
   syncNativeVisibility();
 
   const refreshSheet = () => {
@@ -1572,6 +1582,106 @@ function closeTabGroupView() {
   openTabSheet();
 }
 
+/* ------------------------------------------- Media & downloads per tab */
+
+/* The native bridge scans every page for m3u8/mpd/mp4 media and reports which
+ * tab it belongs to; downloads report the tab that started them. Both feed the
+ * badges in the tab grid so the downloader-first flow is visible at a glance. */
+
+function mediaCountForTab(tabId) {
+  const entry = tabMedia[tabId];
+  return entry ? Object.keys(entry).length : 0;
+}
+
+function noteTabMedia(tabId, url, kind) {
+  if (typeof tabId !== 'number' || tabId < 0 || !url) return false;
+  const entry = tabMedia[tabId] || (tabMedia[tabId] = {});
+  const key = String(url);
+  if (entry[key]) return false;
+  entry[key] = kind || 'video';
+  return true;
+}
+
+function dropTabMedia(tabId) {
+  if (tabMedia[tabId] === undefined) return;
+  delete tabMedia[tabId];
+}
+
+async function refreshTabMedia() {
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.getTabMedia !== 'function') return;
+  try {
+    const result = await plugin.getTabMedia();
+    const items = Array.isArray(result && result.items) ? result.items : [];
+    tabMedia = {};
+    items.forEach((item) => noteTabMedia(Number(item && item.tabId), item && item.url, item && item.kind));
+  } catch (error) {
+    /* Keep whatever the live events already told us. */
+  }
+  updateDownloadsIndicator();
+  if (overlays.has('tabs')) renderTabs();
+}
+
+function rebuildTabDownloadIndex() {
+  const next = {};
+  (downloadsCache || []).forEach((item) => {
+    const tabId = Number(item && item.tabId);
+    if (!Number.isFinite(tabId) || tabId < 0) return;
+    const status = String((item && item.status) || '').toLowerCase();
+    if (status !== 'running' && status !== 'pending' && status !== 'paused') return;
+    const entry = next[tabId] || (next[tabId] = { active: 0, bytes: 0, total: 0 });
+    entry.active += 1;
+    entry.bytes += Number(item.bytes) || 0;
+    entry.total += Number(item.totalBytes) || 0;
+  });
+  tabDownloadIndex = next;
+  updateDownloadsIndicator();
+  if (overlays.has('tabs')) renderTabs();
+}
+
+function tabDownloadBadgesMarkup(tabId) {
+  const media = mediaCountForTab(tabId);
+  const downloads = tabDownloadIndex[tabId];
+  const parts = [];
+  if (media > 0) {
+    parts.push(`<span class="tab-dl-badge is-media" aria-hidden="true">${svgIcon('download', 'icon')}<span>${media}</span></span>`);
+  }
+  if (downloads && downloads.active > 0) {
+    const percent = downloads.total > 0 ? Math.min(99, Math.round((downloads.bytes / downloads.total) * 100)) : 0;
+    parts.push(`<span class="tab-dl-badge is-busy" aria-hidden="true">${svgIcon('download', 'icon')}<span>${percent ? percent + '%' : downloads.active}</span></span>`);
+  }
+  if (!parts.length) return '';
+  return `<div class="tab-badges">${parts.join('')}</div>`;
+}
+
+function mediaHintForTab(tabId) {
+  const media = mediaCountForTab(tabId);
+  if (!media) return '';
+  return media === 1 ? ' · 1 media file ready to download' : ' · ' + media + ' media files ready to download';
+}
+
+function updateDownloadsIndicator() {
+  const hasMedia = mediaCountForTab(activeTabId) > 0;
+  if (dom.downloadsBtn) {
+    dom.downloadsBtn.classList.toggle('has-media', hasMedia);
+    dom.downloadsBtn.setAttribute('aria-label', hasMedia ? 'Downloads, media available' : 'Downloads');
+  }
+  if (dom.downloadsMediaDot) dom.downloadsMediaDot.classList.toggle('hidden', !hasMedia);
+  if (dom.tabDownloadsMediaDot) {
+    const anyMedia = Object.keys(tabMedia).some((id) => mediaCountForTab(Number(id)) > 0);
+    dom.tabDownloadsMediaDot.classList.toggle('hidden', !anyMedia);
+  }
+}
+
+function announceTabMedia(tabId) {
+  if (tabId !== activeTabId || mediaCountForTab(tabId) < 1) return;
+  const now = Date.now();
+  if (mediaToastTabId === tabId && now - mediaToastAt < 15000) return;
+  mediaToastTabId = tabId;
+  mediaToastAt = now;
+  toast('Media available to download');
+}
+
 function tabCardMarkup(tab) {
   const isActive = tab.id === activeTabId;
   const meta = getTabMeta(tab.id);
@@ -1599,13 +1709,16 @@ function tabCardMarkup(tab) {
     : '';
 
   const classes = 'tab-card' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '') + (isSelected ? ' is-selected' : '') + (tabSelectionMode ? ' is-selecting' : '');
+  const badges = tabDownloadBadgesMarkup(tab.id);
+  const mediaHint = mediaHintForTab(tab.id);
 
   return `
-    <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title)}" aria-pressed="${isActive}"${isGroupCard ? ' data-group-card="true"' : ''}>
+    <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title + mediaHint)}" aria-pressed="${isActive}"${isGroupCard ? ' data-group-card="true"' : ''}>
       ${pinButton}
       ${checkButton}
       <div class="tab-preview">
         ${preview}
+        ${badges}
         <button class="tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
           ${svgIcon('close', 'icon icon-xs')}
         </button>
@@ -1709,6 +1822,7 @@ function groupCardMarkup(group) {
 function renderTabs() {
   if (!dom.tabsList) return;
   updateTabBadge();
+  updateDownloadsIndicator();
   const hasTabs = tabs.length > 0;
   dom.tabsEmpty.classList.toggle('hidden', hasTabs);
   dom.tabSelectBar.classList.toggle('hidden', !tabSelectionMode);
@@ -1902,6 +2016,11 @@ async function closeTab(id) {
     return;
   }
   tabSelection.delete(id);
+  dropTabMedia(id);
+  if (tabDownloadIndex[id]) {
+    delete tabDownloadIndex[id];
+    updateDownloadsIndicator();
+  }
   const meta = getTabMeta(id);
   if (meta.groupId) {
     tabGroups = tabGroups.map((group) => {
@@ -1929,6 +2048,7 @@ async function closeAllTabs() {
     toast('Could not close tabs');
     return;
   }
+  tabMedia = {};
   await refreshTabs();
   syncActiveTabUi();
   syncNav();
@@ -2803,7 +2923,7 @@ function renderDownloads() {
     : emptyMarkup);
 }
 
-async function loadDownloads() {
+async function fetchDownloads() {
   try {
     const result = await callPlugin('getDownloads');
     downloadsCache = Array.isArray(result && result.items) ? result.items : [];
@@ -2815,6 +2935,12 @@ async function loadDownloads() {
     downloadsCache = [];
     downloadsUsage = { usedBytes: 0, totalBytes: 0 };
   }
+  rebuildTabDownloadIndex();
+  return downloadsCache;
+}
+
+async function loadDownloads() {
+  await fetchDownloads();
   renderDownloads();
 }
 
@@ -2832,6 +2958,7 @@ function updateDownloadProgress(data) {
 }
 
 function openDownloads() {
+  closeTabSheet();
   openScreen('downloads', dom.downloadsScreen);
   closeMenu();
   loadDownloads();
@@ -3371,6 +3498,10 @@ function attachUiListeners() {
   dom.backBtn.addEventListener('click', goBack);
   dom.forwardBtn.addEventListener('click', goForward);
   dom.homeBtn.addEventListener('click', goHome);
+  dom.downloadsBtn.addEventListener('click', () => {
+    if (overlays.has('downloads')) closeDownloads();
+    else openDownloads();
+  });
   dom.tabsBtn.addEventListener('click', () => {
     if (overlays.has('tabs')) closeTabSheet();
     else openTabSheet();
@@ -3402,6 +3533,10 @@ function attachUiListeners() {
   dom.tabSheetBackdrop.addEventListener('click', closeTabSheet);
   dom.tabsEmptyNewTabBtn.addEventListener('click', () => newTab());
   dom.newTabBtn.addEventListener('click', () => newTab());
+  dom.tabDownloadsBtn.addEventListener('click', () => {
+    closeTabSheet();
+    openDownloads();
+  });
   dom.tabSelectBtn.addEventListener('click', toggleTabSelection);
   dom.tabSelectCancel.addEventListener('click', toggleTabSelection);
   dom.tabGroupBtn.addEventListener('click', groupSelectedTabs);
@@ -3840,16 +3975,66 @@ function attachNativeListeners() {
     });
   });
 
+  listen('mediaDetected', (data) => {
+    if (!data) return;
+    const tabId = Number(data.tabId);
+    if (!Number.isFinite(tabId) || tabId < 0) return;
+    if (!noteTabMedia(tabId, data.url, data.kind)) return;
+    updateDownloadsIndicator();
+    if (overlays.has('tabs')) renderTabs();
+    announceTabMedia(tabId);
+  });
+
+  listen('mediaCleared', (data) => {
+    if (!data) return;
+    const tabId = Number(data.tabId);
+    if (!Number.isFinite(tabId)) return;
+    dropTabMedia(tabId);
+    updateDownloadsIndicator();
+    if (overlays.has('tabs')) renderTabs();
+  });
+
   listen('downloadStarted', (data) => {
     if (data && data.filename) toast('Downloading ' + data.filename);
+    if (data && typeof data.id === 'number' && typeof data.tabId === 'number') {
+      const known = downloadsCache.some((entry) => Number(entry.id) === data.id);
+      if (!known) {
+        downloadsCache = downloadsCache.concat([{
+          id: data.id,
+          filename: data.filename || 'Download',
+          url: data.url || '',
+          tabId: data.tabId,
+          status: 'running',
+          bytes: 0,
+          totalBytes: 0
+        }]);
+      }
+      rebuildTabDownloadIndex();
+    }
     if (overlays.has('downloads')) loadDownloads();
   });
 
   listen('downloadProgress', (data) => {
+    if (!data || typeof data.id !== 'number') return;
+    const item = downloadsCache.find((entry) => Number(entry.id) === data.id);
+    if (item) {
+      item.bytes = Number(data.bytes) || 0;
+      item.totalBytes = Number(data.totalBytes) || 0;
+      if (data.status) item.status = data.status;
+      rebuildTabDownloadIndex();
+    }
     if (overlays.has('downloads')) updateDownloadProgress(data);
   });
 
-  listen('downloadFinished', () => {
+  listen('downloadFinished', (data) => {
+    if (data && typeof data.id === 'number') {
+      const item = downloadsCache.find((entry) => Number(entry.id) === data.id);
+      if (item) {
+        item.status = 'successful';
+        if (typeof data.tabId === 'number') item.tabId = data.tabId;
+      }
+      rebuildTabDownloadIndex();
+    }
     if (overlays.has('downloads')) loadDownloads();
   });
 }
@@ -4001,6 +4186,8 @@ async function boot() {
   syncNav();
   setLoading(false);
   updateTabBadge();
+  refreshTabMedia();
+  fetchDownloads();
 
   if (App && typeof App.addListener === 'function') {
     App.addListener('backButton', () => {

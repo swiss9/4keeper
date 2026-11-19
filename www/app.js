@@ -33,10 +33,76 @@ const ENGINES = {
   }
 };
 
+const SEARCH_LANGUAGES = [
+  { value: '', label: 'Any language' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'nl', label: 'Dutch' },
+  { value: 'sv', label: 'Swedish' },
+  { value: 'da', label: 'Danish' },
+  { value: 'fi', label: 'Finnish' },
+  { value: 'no', label: 'Norwegian' },
+  { value: 'pl', label: 'Polish' },
+  { value: 'tr', label: 'Turkish' },
+  { value: 'ru', label: 'Russian' },
+  { value: 'uk', label: 'Ukrainian' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'he', label: 'Hebrew' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'zh', label: 'Chinese' },
+  { value: 'id', label: 'Indonesian' }
+];
+
+const SEARCH_REGIONS = [
+  { value: '', label: 'Any region' },
+  { value: 'US', label: 'United States (US)' },
+  { value: 'GB', label: 'United Kingdom (UK)' },
+  { value: 'CA', label: 'Canada (CA)' },
+  { value: 'AU', label: 'Australia (AU)' },
+  { value: 'NZ', label: 'New Zealand (NZ)' },
+  { value: 'IE', label: 'Ireland (IE)' },
+  { value: 'DE', label: 'Germany (DE)' },
+  { value: 'FR', label: 'France (FR)' },
+  { value: 'ES', label: 'Spain (ES)' },
+  { value: 'IT', label: 'Italy (IT)' },
+  { value: 'NL', label: 'Netherlands (NL)' },
+  { value: 'SE', label: 'Sweden (SE)' },
+  { value: 'CH', label: 'Switzerland (CH)' },
+  { value: 'AT', label: 'Austria (AT)' },
+  { value: 'BR', label: 'Brazil (BR)' },
+  { value: 'MX', label: 'Mexico (MX)' },
+  { value: 'IN', label: 'India (IN)' },
+  { value: 'JP', label: 'Japan (JP)' },
+  { value: 'KR', label: 'South Korea (KR)' },
+  { value: 'SG', label: 'Singapore (SG)' },
+  { value: 'ZA', label: 'South Africa (ZA)' },
+  { value: 'AE', label: 'United Arab Emirates (AE)' }
+];
+
+function searchLanguageLabel() {
+  const value = String(settings.searchLanguage || '');
+  const found = SEARCH_LANGUAGES.find((item) => item.value === value);
+  return found ? found.label : 'Any language';
+}
+
+function searchRegionLabel() {
+  const value = String(settings.searchRegion || '');
+  const found = SEARCH_REGIONS.find((item) => item.value === value);
+  return found ? found.label : 'Any region';
+}
+
 const DEFAULT_SETTINGS = {
   theme: 'system',
   density: 'comfortable',
   searchEngine: 'duckduckgo',
+  searchLanguage: 'en',
+  searchRegion: '',
   homePage: '',
   startup: 'restore',
   suggestions: true,
@@ -83,7 +149,11 @@ const ICONS = {
   link: '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>',
   newtab: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
-  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/>'
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  pin: '<path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6Z"/><path d="M12 14v7"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
+  upload: '<path d="M12 21V9m-5 5 5-5 5 5"/><path d="M5 3h14"/>'
 };
 
 const svgIcon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
@@ -119,6 +189,14 @@ let dialogState = null;
 let dialogBusy = false;
 let sessionTimer = null;
 let readingModeOn = false;
+let bookmarkFolders = [];
+let tabMeta = {};
+let tabGroups = [];
+let tabSelectionMode = false;
+const tabSelection = new Set();
+let tabGroupFilter = null;
+let tabLongPress = null;
+let suppressTabClick = false;
 
 const overlays = new Set();
 
@@ -152,6 +230,11 @@ const dom = {
   tabsEmpty: $('tabsEmpty'),
   tabsEmptyNewTabBtn: $('tabsEmptyNewTabBtn'),
   newTabBtn: $('newTabBtn'),
+  tabSelectBtn: $('tabSelectBtn'),
+  tabSelectBar: $('tabSelectBar'),
+  tabSelectCount: $('tabSelectCount'),
+  tabSelectCancel: $('tabSelectCancel'),
+  tabGroupBtn: $('tabGroupBtn'),
   closeAllTabsBtn: $('closeAllTabsBtn'),
   closeTabSheetBtn: $('closeTabSheetBtn'),
   menuSheet: $('menuSheet'),
@@ -185,6 +268,9 @@ const dom = {
   bookmarksSearch: $('bookmarksSearch'),
   bookmarksList: $('bookmarksList'),
   bookmarksCount: $('bookmarksCount'),
+  bookmarksNewFolderBtn: $('bookmarksNewFolderBtn'),
+  bookmarksMenuBtn: $('bookmarksMenuBtn'),
+  bookmarkImportInput: $('bookmarkImportInput'),
   downloadsScreen: $('downloadsScreen'),
   downloadsBackBtn: $('downloadsBackBtn'),
   downloadsSettingsBtn: $('downloadsSettingsBtn'),
@@ -266,11 +352,11 @@ function normalizeUrl(raw) {
   if (!str) return null;
   if (/^https?:\/\//i.test(str)) return str;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(str)) {
-    return getEngine().search + encodeURIComponent(str);
+    return buildSearchUrl(str);
   }
   const hostPort = /^[^:\/?#]+:\d+([\/?#]|$)/.test(str);
   if (/^[a-z][a-z0-9+.-]*:/i.test(str) && !hostPort) {
-    return getEngine().search + encodeURIComponent(str);
+    return buildSearchUrl(str);
   }
   if (isProbablyUrl(str)) {
     if (/^localhost(:\d+)?([\/?#]|$)/i.test(str) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?([\/?#]|$)/.test(str)) {
@@ -278,11 +364,20 @@ function normalizeUrl(raw) {
     }
     return 'https://' + str.replace(/^\/+/, '');
   }
-  return getEngine().search + encodeURIComponent(str);
+  return buildSearchUrl(str);
 }
 
 function getEngine() {
   return ENGINES[settings.searchEngine] || ENGINES.duckduckgo;
+}
+
+function buildSearchUrl(query) {
+  let url = getEngine().search + encodeURIComponent(query);
+  const language = String(settings.searchLanguage || '').trim();
+  const region = String(settings.searchRegion || '').trim();
+  if (language) url += '&hl=' + encodeURIComponent(language);
+  if (region) url += '&gl=' + encodeURIComponent(region.toUpperCase());
+  return url;
 }
 
 function getHomePage() {
@@ -410,11 +505,24 @@ const Store = {
     bookmarks = read('bookmarks', []);
     favicons = read('favicons', {});
     session = read('session', { tabs: [], activeIndex: 0 });
+    bookmarkFolders = read('folders', []);
+    tabMeta = read('tabMeta', {});
+    tabGroups = read('tabGroups', []);
 
     if (!Array.isArray(history)) history = [];
     if (!Array.isArray(bookmarks)) bookmarks = [];
+    if (!Array.isArray(bookmarkFolders)) bookmarkFolders = [];
+    if (!Array.isArray(tabGroups)) tabGroups = [];
+    if (!tabMeta || typeof tabMeta !== 'object' || Array.isArray(tabMeta)) tabMeta = {};
     if (!favicons || typeof favicons !== 'object' || Array.isArray(favicons)) favicons = {};
     if (!session || !Array.isArray(session.tabs)) session = { tabs: [], activeIndex: 0 };
+
+    bookmarkFolders = bookmarkFolders
+      .filter((folder) => folder && folder.id && folder.name)
+      .map((folder) => ({ id: String(folder.id), name: String(folder.name), createdAt: Number(folder.createdAt) || Date.now() }));
+    tabGroups = tabGroups
+      .filter((group) => group && group.id && group.name)
+      .map((group) => ({ id: String(group.id), name: String(group.name), createdAt: Number(group.createdAt) || Date.now() }));
 
     migrateLegacy(native);
 
@@ -423,6 +531,9 @@ const Store = {
     this.save('bookmarks');
     this.save('favicons');
     this.save('session');
+    this.save('folders');
+    this.save('tabMeta');
+    this.save('tabGroups');
   },
 
   save(key) {
@@ -432,6 +543,9 @@ const Store = {
     else if (key === 'bookmarks') value = bookmarks;
     else if (key === 'favicons') value = favicons;
     else if (key === 'session') value = session;
+    else if (key === 'folders') value = bookmarkFolders;
+    else if (key === 'tabMeta') value = tabMeta;
+    else if (key === 'tabGroups') value = tabGroups;
     else return;
 
     let json;
@@ -1028,6 +1142,38 @@ function closeChoice() {
 
 /* --------------------------------------------------------------- Dialog */
 
+function mountPickList(container, options, current, onChange) {
+  let selected = current;
+  const list = el('div', 'pick-list' + (options.length > 5 ? ' scroll' : ''));
+  list.setAttribute('role', 'radiogroup');
+  const rows = options.map((option) => {
+    const row = el('button', 'pick-row' + (option.value === selected ? ' is-selected' : ''));
+    row.type = 'button';
+    row.setAttribute('role', 'radio');
+    row.setAttribute('aria-checked', String(option.value === selected));
+    row.dataset.value = String(option.value);
+    const radio = el('span', 'pick-radio');
+    radio.setAttribute('aria-hidden', 'true');
+    const text = el('span', 'pick-text');
+    text.appendChild(el('span', 'pick-label', option.label));
+    if (option.desc) text.appendChild(el('span', 'pick-desc', option.desc));
+    row.append(radio, text);
+    row.addEventListener('click', () => {
+      selected = option.value;
+      rows.forEach((item) => {
+        const on = item.dataset.value === String(selected);
+        item.classList.toggle('is-selected', on);
+        item.setAttribute('aria-checked', String(on));
+      });
+      if (typeof onChange === 'function') onChange(selected);
+    });
+    list.appendChild(row);
+    return row;
+  });
+  container.appendChild(list);
+  return () => selected;
+}
+
 function openDialog(options) {
   overlays.add('dialog');
   hideSuggestions();
@@ -1160,6 +1306,19 @@ function updateSetting(patch, options) {
   }
 }
 
+async function resetBrowsingSession() {
+  await closeAllTabs();
+  history = [];
+  Store.save('history');
+  updateMenuCounts();
+  try {
+    await callPlugin('clearBrowsingData', { history: true, cookies: true, cache: true, downloads: false });
+  } catch (error) {
+    /* ignore */
+  }
+  return true;
+}
+
 /* ------------------------------------------------------------------ Tabs */
 
 async function mountBrowser(force) {
@@ -1231,39 +1390,239 @@ async function syncNav() {
   }
 }
 
+function getTabMeta(id) {
+  return tabMeta[id] || {};
+}
+
+function setTabMeta(id, patch) {
+  tabMeta[id] = Object.assign({}, tabMeta[id], patch);
+  Store.save('tabMeta');
+}
+
+function getTabGroup(id) {
+  return tabGroups.find((group) => group.id === id) || null;
+}
+
+function groupTabs(groupId) {
+  const ids = Array.from(tabSelection);
+  if (ids.length < 2) return;
+  const group = { id: groupId, name: getTabGroup(groupId).name, tabIds: ids, createdAt: Date.now() };
+  tabGroups = tabGroups.map((g) => (g.id === groupId ? group : g));
+  ids.forEach((id) => setTabMeta(id, { groupId }));
+  tabSelection.clear();
+  tabSelectionMode = false;
+  renderTabs();
+  toast('Tabs grouped');
+}
+
+function ungroupTabs(groupId) {
+  const group = getTabGroup(groupId);
+  if (!group) return;
+  group.tabIds.forEach((id) => setTabMeta(id, { groupId: null }));
+  tabGroups = tabGroups.filter((g) => g.id !== groupId);
+  renderTabs();
+  toast('Group removed');
+}
+
+function openTabGroup(groupId) {
+  const group = getTabGroup(groupId);
+  if (!group) return;
+  tabGroupFilter = groupId;
+  closeTabSheet();
+  closeMenu();
+  openTabSheet();
+  renderTabs();
+}
+
+function closeTabGroupView() {
+  tabGroupFilter = null;
+  closeTabSheet();
+  openTabSheet();
+}
+
+function tabCardMarkup(tab) {
+  const isActive = tab.id === activeTabId;
+  const meta = getTabMeta(tab.id);
+  const isPinned = meta.pinned === true;
+  const isSelected = tabSelectionMode && tabSelection.has(tab.id);
+  const inGroup = tabGroupFilter && meta.groupId === tabGroupFilter;
+  const isGroupCard = false;
+
+  const title = tab.title || 'New tab';
+  const host = hostOf(tab.url) || (isActive ? 'Start page' : 'Empty tab');
+  const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
+  const favicon = host ? favicons[hostOf(tab.url)] : null;
+  const preview = favicon
+    ? `<span class="tab-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
+    : `<span class="tab-monogram">${escapeHtml(monogram)}</span>`;
+  const miniFavicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
+
+  const pinButton = `
+    <button class="tab-pin${isPinned ? ' is-pinned' : ''}" type="button" data-tab-pin="${tab.id}" aria-label="${isPinned ? 'Unpin tab' : 'Pin tab'}">
+      ${svgIcon('pin', 'icon icon-sm')}
+    </button>`;
+
+  const checkButton = tabSelectionMode
+    ? `<button class="tab-check" type="button" data-tab-check="${tab.id}" aria-label="${isSelected ? 'Deselect tab' : 'Select tab'}"><svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></button>`
+    : '';
+
+  const classes = 'tab-card' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '') + (isSelected ? ' is-selected' : '') + (tabSelectionMode ? ' is-selecting' : '');
+
+  return `
+    <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title)}" aria-pressed="${isActive}"${isGroupCard ? ' data-group-card="true"' : ''}>
+      ${pinButton}
+      ${checkButton}
+      <div class="tab-preview">
+        ${preview}
+        <button class="tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
+          ${svgIcon('close', 'icon icon-xs')}
+        </button>
+      </div>
+      <div class="tab-meta">
+        <div class="tab-meta-title">
+          ${miniFavicon}
+          <span class="tab-title">${escapeHtml(title)}</span>
+        </div>
+        <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}</div>
+      </div>
+    </div>`;
+}
+
+function toggleTabSelection() {
+  tabSelectionMode = !tabSelectionMode;
+  if (!tabSelectionMode) {
+    tabSelection.clear();
+  }
+  renderTabs();
+}
+
+function groupSelectedTabs() {
+  if (tabSelection.size < 2) return;
+  openDialog({
+    title: 'New tab group',
+    message: 'Enter a name for this group of tabs.',
+    confirmLabel: 'Create group',
+    body: (body) => {
+      const label = el('label', 'dialog-field-label', 'Group name');
+      label.setAttribute('for', 'groupNameInput');
+      const input = el('input', 'text-input');
+      input.id = 'groupNameInput';
+      input.type = 'text';
+      input.maxLength = 40;
+      input.placeholder = 'e.g. Work, Research, Shopping';
+      input.autocomplete = 'off';
+      input.value = 'Tab Group';
+      body.append(label, input);
+      window.setTimeout(() => { input.focus(); input.select(); }, 60);
+    },
+    onConfirm: () => {
+      const input = $('groupNameInput');
+      const name = input ? input.value.trim() : '';
+      if (!name) {
+        toast('Enter a group name');
+        return false;
+      }
+      const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const group = { id: groupId, name, tabIds: Array.from(tabSelection), createdAt: Date.now() };
+      tabGroups.push(group);
+      Store.save('tabGroups');
+      tabSelection.forEach((id) => setTabMeta(id, { groupId }));
+      tabSelection.clear();
+      tabSelectionMode = false;
+      renderTabs();
+      toast('Tab group created');
+    }
+  });
+}
+function groupCardMarkup(group) {
+  const tabCount = group.tabIds.length;
+  const previewTabs = group.tabIds.slice(0, 4);
+  const previews = previewTabs.map((id) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return '';
+    const host = hostOf(tab.url) || 'Empty';
+    const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
+    const favicon = host ? favicons[hostOf(tab.url)] : null;
+    return favicon
+      ? `<span class="group-mini-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
+      : `<span class="group-mini-monogram">${escapeHtml(monogram)}</span>`;
+  }).join('');
+
+  return `
+    <div class="tab-card group-preview" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
+      <div class="group-icon">
+        ${svgIcon('layers', 'icon')}
+      </div>
+      <div class="tab-meta">
+        <div class="tab-meta-title">
+          <span class="tab-title">${escapeHtml(group.name)}</span>
+          <span class="tab-host">${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}</span>
+        </div>
+        <div class="tab-host">${previews}</div>
+      </div>
+      <button class="icon-btn icon-btn-sm" type="button" data-group-close="${group.id}" aria-label="Close group">
+        ${svgIcon('close', 'icon icon-xs')}
+      </button>
+    </div>`;
+}
+
 function renderTabs() {
   updateTabBadge();
   dom.tabsEmpty.classList.toggle('hidden', tabs.length > 0);
+  dom.tabSelectBar.classList.toggle('hidden', !tabSelectionMode);
+  dom.tabSelectCount.textContent = tabSelection.size + ' selected';
+  dom.tabGroupBtn.disabled = tabSelection.size < 2;
+  dom.tabSelectBtn.setAttribute('aria-pressed', String(tabSelectionMode));
 
-  dom.tabsList.innerHTML = tabs
-    .map((tab) => {
-      const isActive = tab.id === activeTabId;
-      const title = tab.title || 'New tab';
-      const host = hostOf(tab.url) || (isActive ? 'Start page' : 'Empty tab');
-      const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
-      const favicon = host ? favicons[hostOf(tab.url)] : null;
-      const preview = favicon
-        ? `<span class="tab-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
-        : `<span class="tab-monogram">${escapeHtml(monogram)}</span>`;
-      const miniFavicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
-      return `
-        <div class="tab-card${isActive ? ' is-active' : ''}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="Switch to tab: ${escapeHtml(title)}" aria-pressed="${isActive}">
-          <div class="tab-preview">
-            ${preview}
-            <button class="tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
-              ${svgIcon('close', 'icon icon-xs')}
-            </button>
-          </div>
-          <div class="tab-meta">
-            <div class="tab-meta-title">
-              ${miniFavicon}
-              <span class="tab-title">${escapeHtml(title)}</span>
-            </div>
-            <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}</div>
-          </div>
-        </div>`;
-    })
-    .join('');
+  const metaById = {};
+  tabs.forEach((tab) => { metaById[tab.id] = getTabMeta(tab.id); });
+
+  if (tabGroupFilter) {
+    const group = getTabGroup(tabGroupFilter);
+    if (!group) {
+      tabGroupFilter = null;
+      renderTabs();
+      return;
+    }
+    const groupTabs = tabs.filter((tab) => getTabMeta(tab.id).groupId === tabGroupFilter);
+    let html = '<div class="tab-group-view">';
+    html += `
+      <button class="icon-btn icon-btn-sm" type="button" data-group-back="true" aria-label="Back to all tabs">
+        ${svgIcon('chevron', 'icon')}
+      </button>
+      <span class="tab-section-label">${escapeHtml(group.name)}</span>
+      <button class="icon-btn icon-btn-sm" type="button" data-group-ungroup="${group.id}" aria-label="Ungroup tabs">
+        ${svgIcon('layers', 'icon')}
+      </button>
+    </div>`;
+    if (groupTabs.length) {
+      html += '<div class="tab-grid is-pinned">' + groupTabs.map(tabCardMarkup).join('') + '</div>';
+    } else {
+      html += '<div class="empty">No tabs in this group</div>';
+    }
+    dom.tabsList.innerHTML = html;
+    return;
+  }
+
+  const pinned = tabs.filter((tab) => metaById[tab.id].pinned === true);
+  const grouped = new Set();
+  tabGroups.forEach((group) => group.tabIds.forEach((id) => grouped.add(id)));
+  const ungrouped = tabs.filter((tab) => !metaById[tab.id].pinned && !grouped.has(tab.id));
+
+  let html = '';
+  if (pinned.length) {
+    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('pin', 'icon') + '</span><span class="tab-section-label">Pinned</span></div>';
+    html += '<div class="tab-grid is-pinned">' + pinned.map(tabCardMarkup).join('') + '</div>';
+  }
+  if (tabGroups.length) {
+    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('layers', 'icon') + '</span><span class="tab-section-label">Groups</span></div>';
+    tabGroups.forEach((group) => { html += groupCardMarkup(group); });
+  }
+  if (ungrouped.length) {
+    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span></div>';
+    html += '<div class="tab-grid">' + ungrouped.map(tabCardMarkup).join('') + '</div>';
+  }
+  dom.tabsList.innerHTML = html;
 }
 
 async function createTabWithUrl(url, activate) {
@@ -1381,6 +1740,18 @@ async function closeTab(id) {
   } catch (error) {
     toast('Could not close the tab');
     return;
+  }
+  tabSelection.delete(id);
+  const meta = getTabMeta(id);
+  if (meta.groupId) {
+    tabGroups = tabGroups.map((group) => {
+      if (group.id !== meta.groupId) return group;
+      const next = Object.assign({}, group);
+      next.tabIds = group.tabIds.filter((tid) => tid !== id);
+      return next;
+    });
+    tabGroups = tabGroups.filter((group) => group.tabIds.length > 0);
+    Store.save('tabGroups');
   }
   await refreshTabs();
   if (!tabs.length) {
@@ -1591,24 +1962,26 @@ function clearHistoryData(range) {
 }
 
 function openClearData() {
+  let range = 'all';
   openDialog({
     title: 'Delete browsing data',
     message: 'Choose a time range and what to remove. Bookmarks, settings and downloads stay.',
     confirmLabel: 'Delete data',
+    destructive: true,
     body: (body) => {
-      const label = el('label', 'dialog-select-label');
-      label.setAttribute('for', 'clearDataRange');
-      label.textContent = 'Time range';
+      const label = el('div', 'dialog-field-label', 'Time range');
+      const rangeHost = el('div');
+      const readRange = mountPickList(
+        rangeHost,
+        DATA_RANGES.map(([value, text]) => ({ value, label: text })),
+        range,
+        (next) => {
+          range = next;
+        }
+      );
+      range = readRange();
 
-      const select = el('select', 'dialog-select');
-      select.id = 'clearDataRange';
-      DATA_RANGES.forEach(([value, text]) => {
-        const option = el('option', '', text);
-        option.value = value;
-        select.appendChild(option);
-      });
-      select.value = 'all';
-
+      const what = el('div', 'dialog-field-label', 'What to delete');
       const wrap = el('div', 'dialog-options');
       [
         ['history', 'Browsing history', true],
@@ -1624,11 +1997,9 @@ function openClearData() {
         wrap.appendChild(row);
       });
 
-      body.append(label, select, wrap);
+      body.append(label, rangeHost, what, wrap);
     },
     onConfirm: async () => {
-      const rangeSelect = $('clearDataRange');
-      const range = rangeSelect ? rangeSelect.value : 'all';
       const checked = (key) => {
         const input = $('clear-' + key);
         return !!(input && input.checked);
@@ -1657,7 +2028,8 @@ function openClearData() {
           return false;
         }
       }
-      toast('Browsing data deleted');
+      if (range === 'all') await resetBrowsingSession();
+      toast(range === 'all' ? 'All browsing data deleted' : 'Browsing data deleted');
     }
   });
 }
@@ -1759,6 +2131,166 @@ function removeBookmark(id) {
   updateMenuBookmark();
 }
 
+function folderById(id) {
+  if (!id) return null;
+  return bookmarkFolders.find((folder) => folder.id === id) || null;
+}
+
+function folderBookmarkCount(folderId) {
+  return bookmarks.filter((item) => item.folderId === folderId).length;
+}
+
+function createBookmarkFolder(name) {
+  const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!clean) return null;
+  const existing = bookmarkFolders.find((folder) => folder.name.toLowerCase() === clean.toLowerCase());
+  if (existing) return existing;
+  const folder = {
+    id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: clean,
+    createdAt: Date.now()
+  };
+  bookmarkFolders.push(folder);
+  Store.save('folders');
+  return folder;
+}
+
+function promptFolderName(options) {
+  const opts = options || {};
+  openDialog({
+    title: opts.title || 'New folder',
+    message: opts.message || 'Bookmarks you move here stay grouped together.',
+    confirmLabel: opts.confirmLabel || 'Create',
+    body: (body) => {
+      const label = el('label', 'dialog-field-label', 'Folder name');
+      label.setAttribute('for', 'folderNameInput');
+      const input = el('input', 'text-input');
+      input.id = 'folderNameInput';
+      input.type = 'text';
+      input.maxLength = 60;
+      input.placeholder = 'e.g. Work, Recipes, Reading';
+      input.autocomplete = 'off';
+      input.value = opts.value || '';
+      body.append(label, input);
+      window.setTimeout(() => input.focus(), 60);
+    },
+    onConfirm: () => {
+      const input = $('folderNameInput');
+      const name = input ? input.value.trim() : '';
+      if (!name) {
+        toast('Enter a folder name');
+        return false;
+      }
+      const folder = createBookmarkFolder(name);
+      if (!folder) {
+        toast('That name cannot be used');
+        return false;
+      }
+      if (typeof opts.onDone === 'function') opts.onDone(folder);
+      if (overlays.has('bookmarks')) renderBookmarks();
+    }
+  });
+}
+
+function moveBookmarkToFolder(id, folderId) {
+  const item = bookmarks.find((bookmark) => bookmark.id === id);
+  if (!item) return;
+  const folder = folderId ? folderById(folderId) : null;
+  if (folder) item.folderId = folder.id;
+  else delete item.folderId;
+  Store.save('bookmarks');
+  renderBookmarks();
+  toast(folder ? 'Moved to ' + folder.name : 'Moved to Unfiled');
+}
+
+function openBookmarkFolderPicker(id) {
+  const item = bookmarks.find((bookmark) => bookmark.id === id);
+  if (!item) return;
+  const options = [{ value: '', label: 'No folder', desc: 'Keep this bookmark unfiled' }];
+  bookmarkFolders.forEach((folder) => {
+    options.push({
+      value: folder.id,
+      label: folder.name,
+      desc: folderBookmarkCount(folder.id) + ' saved'
+    });
+  });
+  options.push({ value: '__new', label: 'New folder…', desc: 'Create a folder and move it there' });
+  openChoice('Move bookmark', options, item.folderId || '', (value) => {
+    if (value === '__new') {
+      promptFolderName({
+        title: 'New folder',
+        message: 'The bookmark will be moved into this folder.',
+        onDone: (folder) => moveBookmarkToFolder(id, folder.id)
+      });
+      return;
+    }
+    moveBookmarkToFolder(id, value);
+  });
+}
+
+function renameBookmarkFolder(folderId) {
+  const folder = folderById(folderId);
+  if (!folder) return;
+  promptFolderName({
+    title: 'Rename folder',
+    message: 'Choose a new name for this folder.',
+    confirmLabel: 'Save',
+    value: folder.name,
+    onDone: (renamed) => {
+      folder.name = renamed.name;
+      Store.save('folders');
+      renderBookmarks();
+      toast('Folder renamed');
+    }
+  });
+}
+
+function deleteBookmarkFolder(folderId) {
+  const folder = folderById(folderId);
+  if (!folder) return;
+  const count = folderBookmarkCount(folderId);
+  openDialog({
+    title: 'Delete "' + folder.name + '"?',
+    message: count
+      ? 'The folder is removed and its ' + count + (count === 1 ? ' bookmark moves' : ' bookmarks move') + ' to Unfiled.'
+      : 'This empty folder will be removed.',
+    confirmLabel: 'Delete folder',
+    destructive: true,
+    onConfirm: () => {
+      bookmarkFolders = bookmarkFolders.filter((item) => item.id !== folderId);
+      bookmarks = bookmarks.map((item) => {
+        if (item.folderId !== folderId) return item;
+        const next = Object.assign({}, item);
+        delete next.folderId;
+        return next;
+      });
+      Store.save('folders');
+      Store.save('bookmarks');
+      renderBookmarks();
+      toast('Folder deleted');
+    }
+  });
+}
+
+function bookmarkRowMarkup(item) {
+  return `
+    <div class="list-item" data-bookmark-open="${item.id}">
+      ${faviconMarkup(item.url)}
+      <div class="list-text">
+        <div class="list-title">${escapeHtml(item.title || hostOf(item.url))}</div>
+        <div class="list-subtitle">${escapeHtml(displayUrl(item.url))}</div>
+      </div>
+      <div class="list-meta">
+        <button class="icon-btn icon-btn-sm" type="button" data-bookmark-move="${item.id}" aria-label="Move bookmark to a folder">
+          ${svgIcon('folder', 'icon icon-sm')}
+        </button>
+        <button class="icon-btn icon-btn-sm" type="button" data-bookmark-delete="${item.id}" aria-label="Remove bookmark">
+          ${svgIcon('close', 'icon icon-xs')}
+        </button>
+      </div>
+    </div>`;
+}
+
 function renderBookmarks() {
   const query = (dom.bookmarksSearch.value || '').trim().toLowerCase();
   const items = bookmarks.filter((item) => {
@@ -1770,29 +2302,239 @@ function renderBookmarks() {
     ? `${bookmarks.length} ${bookmarks.length === 1 ? 'bookmark' : 'bookmarks'}`
     : '';
 
-  if (!items.length) {
+  if (!bookmarks.length) {
     dom.bookmarksList.innerHTML = `
       <div class="empty">
         ${svgIcon('bookmark', 'empty-icon')}
-        <div class="empty-title">${query ? 'No matching bookmarks' : 'No bookmarks yet'}</div>
-        <div class="empty-text">${query ? 'Try a different search.' : 'Use the menu to bookmark the page you are on.'}</div>
+        <div class="empty-title">No bookmarks yet</div>
+        <div class="empty-text">Use the menu to bookmark the page you are on, or import an HTML file from another browser.</div>
       </div>`;
     return;
   }
 
-  dom.bookmarksList.innerHTML = items
-    .map((item) => `
-      <div class="list-item" data-bookmark-open="${item.id}">
-        ${faviconMarkup(item.url)}
-        <div class="list-text">
-          <div class="list-title">${escapeHtml(item.title || hostOf(item.url))}</div>
-          <div class="list-subtitle">${escapeHtml(displayUrl(item.url))}</div>
+  if (!items.length) {
+    dom.bookmarksList.innerHTML = `
+      <div class="empty">
+        ${svgIcon('search', 'empty-icon')}
+        <div class="empty-title">No matching bookmarks</div>
+        <div class="empty-text">Try a different search.</div>
+      </div>`;
+    return;
+  }
+
+  if (query) {
+    dom.bookmarksList.innerHTML = items.map(bookmarkRowMarkup).join('');
+    return;
+  }
+
+  const knownFolderIds = new Set(bookmarkFolders.map((folder) => folder.id));
+  let html = '';
+
+  bookmarkFolders.forEach((folder) => {
+    const list = items.filter((item) => item.folderId === folder.id);
+    html += `
+      <div class="folder-head">
+        ${svgIcon('folder', 'icon')}
+        <div class="folder-head-text">
+          <span class="folder-head-name">${escapeHtml(folder.name)}</span>
+          <span class="folder-head-count">${list.length}</span>
         </div>
-        <button class="icon-btn icon-btn-sm" type="button" data-bookmark-delete="${item.id}" aria-label="Remove bookmark">
-          ${svgIcon('close', 'icon icon-xs')}
+        <button class="icon-btn icon-btn-sm" type="button" data-folder-rename="${escapeHtml(folder.id)}" aria-label="Rename folder">
+          ${svgIcon('text', 'icon icon-sm')}
         </button>
-      </div>`)
-    .join('');
+        <button class="icon-btn icon-btn-sm" type="button" data-folder-delete="${escapeHtml(folder.id)}" aria-label="Delete folder">
+          ${svgIcon('trash', 'icon icon-sm')}
+        </button>
+      </div>`;
+    html += list.length
+      ? list.map(bookmarkRowMarkup).join('')
+      : '<div class="folder-empty">No bookmarks in this folder yet</div>';
+  });
+
+  const loose = items.filter((item) => !item.folderId || !knownFolderIds.has(item.folderId));
+  if (loose.length) {
+    if (bookmarkFolders.length) html += '<div class="list-section-title">Unfiled</div>';
+    html += loose.map(bookmarkRowMarkup).join('');
+  }
+
+  dom.bookmarksList.innerHTML = html;
+}
+
+/* ------------------------------------- Bookmark import / export (HTML) */
+
+function openBookmarksMenu() {
+  dom.bookmarksMenuBtn.setAttribute('aria-expanded', 'true');
+  openChoice('Bookmarks', [
+    { value: 'folder', label: 'New folder', desc: 'Group bookmarks together' },
+    { value: 'import', label: 'Import bookmarks (HTML)', desc: 'Chrome, Edge, Firefox or Safari export' },
+    { value: 'export', label: 'Export bookmarks (HTML)', desc: 'Save bookmarks.html with every folder' }
+  ], '', (value) => {
+    dom.bookmarksMenuBtn.setAttribute('aria-expanded', 'false');
+    if (value === 'folder') promptFolderName({});
+    else if (value === 'import') openBookmarkImport();
+    else if (value === 'export') exportBookmarksHtml();
+  });
+}
+
+function openBookmarkImport() {
+  if (!dom.bookmarkImportInput) {
+    toast('Import is not available');
+    return;
+  }
+  dom.bookmarkImportInput.value = '';
+  dom.bookmarkImportInput.click();
+}
+
+function nearestBookmarkFolderName(anchor) {
+  let node = anchor.parentElement;
+  while (node && node.tagName !== 'DL') node = node.parentElement;
+  while (node) {
+    const holder = node.parentElement;
+    if (holder && holder.tagName === 'DT') {
+      const heading = Array.from(holder.children).find((child) => child.tagName === 'H3');
+      const name = heading ? (heading.textContent || '').trim() : '';
+      if (name) return name;
+    }
+    let next = node.parentElement;
+    while (next && next.tagName !== 'DL') next = next.parentElement;
+    node = next;
+  }
+  return '';
+}
+
+function importBookmarkHtml(source) {
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(String(source || ''), 'text/html');
+  } catch (error) {
+    toast('That file could not be read');
+    return;
+  }
+  const anchors = Array.from(doc.querySelectorAll('a[href]'));
+  if (!anchors.length) {
+    toast('No bookmarks found in that file');
+    return;
+  }
+
+  const known = new Set(bookmarks.map((item) => item.url));
+  let added = 0;
+  let skipped = 0;
+  const now = Date.now();
+
+  anchors.forEach((anchor) => {
+    const href = String(anchor.getAttribute('href') || '').trim();
+    if (!isHttpUrl(href) || known.has(href)) {
+      skipped++;
+      return;
+    }
+    known.add(href);
+    const title = (anchor.textContent || '').trim().slice(0, 300) || hostOf(href) || href;
+    const addDate = Number(anchor.getAttribute('add_date') || anchor.getAttribute('ADD_DATE')) || 0;
+    const timestamp = addDate > 100000000000 ? addDate : addDate > 1000000000 ? addDate * 1000 : now + added;
+    const entry = { id: now + added, url: href, title, timestamp };
+    const folderName = nearestBookmarkFolderName(anchor);
+    if (folderName) {
+      const folder = createBookmarkFolder(folderName);
+      if (folder) entry.folderId = folder.id;
+    }
+    bookmarks.unshift(entry);
+    added++;
+  });
+
+  Store.save('bookmarks');
+  Store.save('folders');
+  updateMenuCounts();
+  if (overlays.has('bookmarks')) renderBookmarks();
+
+  if (!added) {
+    toast('No new bookmarks to import');
+    return;
+  }
+  toast('Imported ' + added + (added === 1 ? ' bookmark' : ' bookmarks') + (skipped ? ' · ' + skipped + ' skipped' : ''));
+}
+
+function handleBookmarkFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => importBookmarkHtml(reader.result);
+  reader.onerror = () => toast('That file could not be read');
+  reader.readAsText(file);
+}
+
+function buildBookmarksHtml() {
+  const lines = [];
+  lines.push('<!DOCTYPE NETSCAPE-Bookmark-file-1>');
+  lines.push('<!-- This is an automatically generated file. It will be read and overwritten. -->');
+  lines.push('<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">');
+  lines.push('<TITLE>Bookmarks</TITLE>');
+  lines.push('<H1>Bookmarks</H1>');
+  lines.push('<DL><p>');
+
+  const escapeAttr = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+  const anchorLine = (item, indent) => {
+    const addDate = Math.round((Number(item.timestamp) || Date.now()) / 1000);
+    return indent + '<DT><A HREF="' + escapeAttr(item.url) + '" ADD_DATE="' + addDate + '">' +
+      escapeAttr(item.title || hostOf(item.url) || item.url) + '</A>';
+  };
+
+  bookmarkFolders.forEach((folder) => {
+    const list = bookmarks.filter((item) => item.folderId === folder.id);
+    if (!list.length) return;
+    lines.push('    <DT><H3>' + escapeAttr(folder.name) + '</H3>');
+    lines.push('    <DL><p>');
+    list.forEach((item) => lines.push(anchorLine(item, '        ')));
+    lines.push('    </DL><p>');
+  });
+
+  const knownFolderIds = new Set(bookmarkFolders.map((folder) => folder.id));
+  bookmarks
+    .filter((item) => !item.folderId || !knownFolderIds.has(item.folderId))
+    .forEach((item) => lines.push(anchorLine(item, '    ')));
+
+  lines.push('</DL><p>');
+  return lines.join('\n') + '\n';
+}
+
+function exportBookmarksHtml() {
+  if (!bookmarks.length) {
+    toast('There are no bookmarks to export');
+    return;
+  }
+  const html = buildBookmarksHtml();
+  const fileName = 'bookmarks.html';
+  let blobUrl = '';
+  try {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    blobUrl = (window.URL || window.webkitURL).createObjectURL(blob);
+  } catch (error) {
+    blobUrl = '';
+  }
+
+  if (!blobUrl) {
+    toast('Export is not supported here');
+    return;
+  }
+
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = fileName;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  try {
+    link.click();
+    toast('Exported ' + fileName);
+  } catch (error) {
+    toast('Could not start the export');
+  }
+  window.setTimeout(() => {
+    try {
+      (window.URL || window.webkitURL).revokeObjectURL(blobUrl);
+    } catch (error) {
+      /* ignore */
+    }
+    link.remove();
+  }, 5000);
 }
 
 function openBookmarks() {
@@ -1803,6 +2545,7 @@ function openBookmarks() {
 }
 
 function closeBookmarks() {
+  dom.bookmarksMenuBtn.setAttribute('aria-expanded', 'false');
   closeScreen('bookmarks', dom.bookmarksScreen);
 }
 
@@ -2114,6 +2857,12 @@ function settingsPageSearch() {
       ${settingRowToggle('suggestBookmarks', 'Show bookmarks in suggestions', 'Compact list below the address bar', 'is-sub')}
       ${settingRowToggle('suggestHistory', 'Show history in suggestions', 'Recently visited pages as you type', 'is-sub')}
     `) +
+    settingSection('Search language', `
+      ${settingRowButton('globe', 'Search language', 'Preferred language for results', searchLanguageLabel(), 'searchLanguage')}
+    `) +
+    settingSection('Search region', `
+      ${settingRowButton('globe', 'Search region', 'Preferred region for results', searchRegionLabel(), 'searchRegion')}
+    `) +
     settingSection('Homepage', `
       ${settingRowButton('link', 'Homepage', 'Opened by the Home button', settings.homePage || getEngine().home, 'homePage')}
       ${settingRowButton('text', 'On startup', 'What opens when the app starts', startupLabel(), 'startup')}
@@ -2312,6 +3061,12 @@ function handleSettingsAction(action) {
         { value: 'newtab', label: 'Open new tab', desc: 'Start on a blank tab' }
       ], settings.startup, (value) => updateSetting({ startup: value }, { rerender: true }));
       break;
+    case 'searchLanguage':
+      openChoice('Search language', SEARCH_LANGUAGES, String(settings.searchLanguage || ''), (value) => updateSetting({ searchLanguage: value }, { rerender: true, toastMessage: 'Search language updated' }));
+      break;
+    case 'searchRegion':
+      openChoice('Search region', SEARCH_REGIONS, String(settings.searchRegion || ''), (value) => updateSetting({ searchRegion: value }, { rerender: true, toastMessage: 'Search region updated' }));
+      break;
     case 'cookies':
       openChoice('Cookies', [
         { value: 'all', label: 'Allow all', desc: 'Sites work as expected' },
@@ -2487,6 +3242,9 @@ function attachUiListeners() {
   dom.tabSheetBackdrop.addEventListener('click', closeTabSheet);
   dom.tabsEmptyNewTabBtn.addEventListener('click', () => newTab());
   dom.newTabBtn.addEventListener('click', () => newTab());
+  dom.tabSelectBtn.addEventListener('click', toggleTabSelection);
+  dom.tabSelectCancel.addEventListener('click', toggleTabSelection);
+  dom.tabGroupBtn.addEventListener('click', groupSelectedTabs);
   dom.closeAllTabsBtn.addEventListener('click', () => {
     if (!tabs.length) return;
     openDialog({
@@ -2500,6 +3258,62 @@ function attachUiListeners() {
     });
   });
   dom.tabsList.addEventListener('click', (event) => {
+    const pinButton = event.target.closest('[data-tab-pin]');
+    if (pinButton) {
+      event.stopPropagation();
+      const id = Number(pinButton.getAttribute('data-tab-pin'));
+      const meta = getTabMeta(id);
+      setTabMeta(id, { pinned: !meta.pinned });
+      renderTabs();
+      return;
+    }
+    const checkButton = event.target.closest('[data-tab-check]');
+    if (checkButton) {
+      event.stopPropagation();
+      const id = Number(checkButton.getAttribute('data-tab-check'));
+      if (tabSelection.has(id)) tabSelection.delete(id);
+      else tabSelection.add(id);
+      renderTabs();
+      return;
+    }
+    const groupButton = event.target.closest('[data-group-close]');
+    if (groupButton) {
+      event.stopPropagation();
+      const groupId = groupButton.getAttribute('data-group-close');
+      openDialog({
+        title: 'Close group?',
+        message: 'The group will be removed and its tabs will stay open.',
+        confirmLabel: 'Close group',
+        destructive: true,
+        onConfirm: () => ungroupTabs(groupId)
+      });
+      return;
+    }
+    const groupBack = event.target.closest('[data-group-back]');
+    if (groupBack) {
+      event.stopPropagation();
+      closeTabGroupView();
+      return;
+    }
+    const groupUngroup = event.target.closest('[data-group-ungroup]');
+    if (groupUngroup) {
+      event.stopPropagation();
+      const groupId = groupUngroup.getAttribute('data-group-ungroup');
+      openDialog({
+        title: 'Ungroup tabs?',
+        message: 'The group will be removed and its tabs will move to the main tab list.',
+        confirmLabel: 'Ungroup',
+        destructive: true,
+        onConfirm: () => ungroupTabs(groupId)
+      });
+      return;
+    }
+    const groupCard = event.target.closest('[data-group-id]');
+    if (groupCard) {
+      event.stopPropagation();
+      openTabGroup(groupCard.getAttribute('data-group-id'));
+      return;
+    }
     const closeButton = event.target.closest('[data-close-tab]');
     if (closeButton) {
       event.stopPropagation();
@@ -2507,7 +3321,14 @@ function attachUiListeners() {
       return;
     }
     const card = event.target.closest('[data-tab-id]');
-    if (card) switchTab(Number(card.getAttribute('data-tab-id')));
+    if (card) {
+      if (suppressTabClick) {
+        suppressTabClick = false;
+        return;
+      }
+      if (tabSelectionMode) return;
+      switchTab(Number(card.getAttribute('data-tab-id')));
+    }
   });
   dom.tabsList.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2515,6 +3336,31 @@ function attachUiListeners() {
     if (!card) return;
     event.preventDefault();
     switchTab(Number(card.getAttribute('data-tab-id')));
+  });
+  dom.tabsList.addEventListener('contextmenu', (event) => {
+    const card = event.target.closest('[data-tab-id]');
+    if (!card) return;
+    event.preventDefault();
+    const id = Number(card.getAttribute('data-tab-id'));
+    const meta = getTabMeta(id);
+    openChoice('Tab', [
+      { value: 'pin', label: meta.pinned ? 'Unpin tab' : 'Pin tab', desc: meta.pinned ? 'Move back to regular tabs' : 'Keep at the start of the list' },
+      { value: 'close', label: 'Close tab', desc: 'This tab will be closed' },
+      { value: 'closeOthers', label: 'Close other tabs', desc: 'Close every tab except this one' },
+      { value: 'duplicate', label: 'Duplicate tab', desc: 'Open the same page in a new tab' }
+    ], '', (value) => {
+      if (value === 'pin') {
+        setTabMeta(id, { pinned: !meta.pinned });
+        renderTabs();
+      } else if (value === 'close') {
+        closeTab(id);
+      } else if (value === 'closeOthers') {
+        tabs.filter((tab) => tab.id !== id).forEach((tab) => closeTab(tab.id));
+      } else if (value === 'duplicate') {
+        const tab = tabs.find((t) => t.id === id);
+        if (tab) newTab(tab.url);
+      }
+    });
   });
 
   dom.closeMenuBtn.addEventListener('click', closeMenu);
@@ -2555,7 +3401,32 @@ function attachUiListeners() {
 
   dom.bookmarksBackBtn.addEventListener('click', closeBookmarks);
   dom.bookmarksSearch.addEventListener('input', renderBookmarks);
+  dom.bookmarksNewFolderBtn.addEventListener('click', () => promptFolderName({}));
+  dom.bookmarksMenuBtn.addEventListener('click', openBookmarksMenu);
+  dom.bookmarkImportInput.addEventListener('change', (event) => {
+    const file = event.target.files && event.target.files[0];
+    handleBookmarkFile(file);
+    event.target.value = '';
+  });
   dom.bookmarksList.addEventListener('click', (event) => {
+    const renameButton = event.target.closest('[data-folder-rename]');
+    if (renameButton) {
+      event.stopPropagation();
+      renameBookmarkFolder(renameButton.getAttribute('data-folder-rename'));
+      return;
+    }
+    const folderDeleteButton = event.target.closest('[data-folder-delete]');
+    if (folderDeleteButton) {
+      event.stopPropagation();
+      deleteBookmarkFolder(folderDeleteButton.getAttribute('data-folder-delete'));
+      return;
+    }
+    const moveButton = event.target.closest('[data-bookmark-move]');
+    if (moveButton) {
+      event.stopPropagation();
+      openBookmarkFolderPicker(Number(moveButton.getAttribute('data-bookmark-move')));
+      return;
+    }
     const deleteButton = event.target.closest('[data-bookmark-delete]');
     if (deleteButton) {
       event.stopPropagation();

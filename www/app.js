@@ -188,6 +188,8 @@ let loadingTimer = null;
 let dialogState = null;
 let dialogBusy = false;
 let sessionTimer = null;
+let tabsReady = false;
+let bootPromise = null;
 let readingModeOn = false;
 let bookmarkFolders = [];
 let tabMeta = {};
@@ -380,19 +382,51 @@ function buildSearchUrl(query) {
   return url;
 }
 
+const GOOGLE_HOME_HOST = /^google(\.[a-z]{2,4}){1,2}$/i;
+
+/* Google serves a country-specific homepage based on the IP. `/ncr` keeps it
+ * neutral, and hl/gl apply the saved search language + region on every load. */
+function isGoogleHomeUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.port) return false;
+    const host = parsed.hostname.replace(/^www\./i, '');
+    if (!GOOGLE_HOME_HOST.test(host)) return false;
+    const path = parsed.pathname.replace(/\/+$/, '');
+    if (path && path !== '/ncr' && path !== '/webhp') return false;
+    if (parsed.searchParams.get('q')) return false;
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function buildHomeUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url || !isGoogleHomeUrl(url)) return url;
+  const language = String(settings.searchLanguage || '').trim();
+  const region = String(settings.searchRegion || '').trim();
+  const params = [];
+  if (language) params.push('hl=' + encodeURIComponent(language));
+  if (region) params.push('gl=' + encodeURIComponent(region.toLowerCase()));
+  return 'https://www.google.com/ncr' + (params.length ? '?' + params.join('&') : '');
+}
+
 function getHomePage() {
   const custom = String(settings.homePage || '').trim();
   if (custom) {
-    if (/^https?:\/\//i.test(custom)) return custom;
+    if (/^https?:\/\//i.test(custom)) return buildHomeUrl(custom);
     const hostPort = /^[^:\/?#]+:\d+([\/?#]|$)/.test(custom);
     if (isProbablyUrl(custom) && (!/^[a-z][a-z0-9+.-]*:/i.test(custom) || hostPort)) {
       if (/^localhost(:\d+)?([\/?#]|$)/i.test(custom) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?([\/?#]|$)/.test(custom)) {
         return 'http://' + custom;
       }
-      return 'https://' + custom.replace(/^\/+/, '');
+      return buildHomeUrl('https://' + custom.replace(/^\/+/, ''));
     }
   }
-  return getEngine().home;
+  return buildHomeUrl(getEngine().home);
 }
 
 function displayUrl(url) {
@@ -472,6 +506,69 @@ function iconNode(name, className = 'icon') {
 
 /* ----------------------------------------------------------------- Store */
 
+/* Session payloads are persisted as JSON, so a crash or a partial write can
+ * leave anything behind. Everything below fails closed and wipes the broken
+ * value instead of leaving the tab manager with an unusable state. */
+function wipeStoredSession(reason) {
+  session = { tabs: [], activeIndex: 0 };
+  try {
+    localStorage.removeItem('4k.session');
+  } catch (error) {
+    /* ignore */
+  }
+  const plugin = getPlugin();
+  if (plugin && typeof plugin.storageSet === 'function') {
+    try {
+      Promise.resolve(plugin.storageSet({ key: 'session', value: JSON.stringify(session) })).catch(() => {});
+    } catch (error) {
+      /* ignore */
+    }
+  }
+  if (reason) console.warn('[4keeper] Session reset:', reason);
+}
+
+function normalizeSession(raw) {
+  const empty = { tabs: [], activeIndex: 0 };
+  if (raw == null) return empty;
+  if (typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.tabs)) {
+    wipeStoredSession('unexpected session shape');
+    return empty;
+  }
+  const restored = raw.tabs
+    .filter((tab) => tab && typeof tab.url === 'string' && isHttpUrl(tab.url))
+    .map((tab) => ({ url: String(tab.url), title: typeof tab.title === 'string' ? tab.title : '' }))
+    .slice(0, 8);
+  if (!restored.length && raw.tabs.length) {
+    wipeStoredSession('no usable tab entries');
+    return empty;
+  }
+  let activeIndex = Number(raw.activeIndex);
+  if (!Number.isFinite(activeIndex) || activeIndex < 0) activeIndex = 0;
+  activeIndex = restored.length ? Math.min(Math.round(activeIndex), restored.length - 1) : 0;
+  return { tabs: restored, activeIndex };
+}
+
+function parseStoredSession(raw) {
+  if (typeof raw !== 'string' || !raw) return { tabs: [], activeIndex: 0 };
+  try {
+    return normalizeSession(JSON.parse(raw));
+  } catch (error) {
+    wipeStoredSession('session JSON could not be parsed');
+    return { tabs: [], activeIndex: 0 };
+  }
+}
+
+function readStoredSession(native) {
+  if (native && typeof native.session === 'string') return parseStoredSession(native.session);
+  let raw = null;
+  try {
+    raw = localStorage.getItem('4k.session');
+  } catch (error) {
+    raw = null;
+  }
+  return parseStoredSession(raw);
+}
+
 const Store = {
   async hydrate() {
     const plugin = getPlugin();
@@ -504,7 +601,7 @@ const Store = {
     history = read('history', []);
     bookmarks = read('bookmarks', []);
     favicons = read('favicons', {});
-    session = read('session', { tabs: [], activeIndex: 0 });
+    session = readStoredSession(native);
     bookmarkFolders = read('folders', []);
     tabMeta = read('tabMeta', {});
     tabGroups = read('tabGroups', []);
@@ -522,7 +619,15 @@ const Store = {
       .map((folder) => ({ id: String(folder.id), name: String(folder.name), createdAt: Number(folder.createdAt) || Date.now() }));
     tabGroups = tabGroups
       .filter((group) => group && group.id && group.name)
-      .map((group) => ({ id: String(group.id), name: String(group.name), createdAt: Number(group.createdAt) || Date.now() }));
+      .map((group) => ({
+        id: String(group.id),
+        name: String(group.name),
+        createdAt: Number(group.createdAt) || Date.now(),
+        tabIds: Array.isArray(group.tabIds)
+          ? group.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+          : []
+      }))
+      .filter((group) => group.tabIds.length > 0);
 
     migrateLegacy(native);
 
@@ -1001,6 +1106,15 @@ function openTabSheet() {
   closeOtherSheets('tabs');
   renderTabs();
   syncNativeVisibility();
+
+  const refreshSheet = () => {
+    if (overlays.has('tabs')) renderTabs();
+  };
+  if (!tabsReady) {
+    Promise.resolve(bootPromise).then(refreshSheet).catch(() => {});
+    return;
+  }
+  if (!tabs.length) ensureTabExists().then(refreshSheet).catch(() => {});
 }
 
 function closeTabSheet() {
@@ -1341,6 +1455,23 @@ async function mountBrowser(force) {
   }
 }
 
+async function ensureTabExists() {
+  if (!getPlugin()) return false;
+  if (!Array.isArray(tabs)) tabs = [];
+  if (tabs.length) return true;
+  await refreshTabs().catch(() => {});
+  if (tabs.length) return true;
+  try {
+    await callPlugin('createTab', { url: getHomePage(), activate: true });
+  } catch (error) {
+    return false;
+  }
+  await refreshTabs().catch(() => {});
+  syncActiveTabUi();
+  syncNav();
+  return tabs.length > 0;
+}
+
 async function refreshTabs() {
   const plugin = getPlugin();
   if (!plugin) return;
@@ -1365,6 +1496,7 @@ function scheduleSessionSave() {
 }
 
 function saveSession() {
+  if (!tabsReady) return;
   const saved = [];
   let activeIndex = 0;
   tabs.forEach((tab) => {
@@ -1534,9 +1666,17 @@ function groupSelectedTabs() {
     }
   });
 }
+function validTabGroups() {
+  return (Array.isArray(tabGroups) ? tabGroups : []).filter(
+    (group) => group && group.id && group.name && Array.isArray(group.tabIds)
+  );
+}
+
 function groupCardMarkup(group) {
-  const tabCount = group.tabIds.length;
-  const previewTabs = group.tabIds.slice(0, 4);
+  const tabIds = Array.isArray(group.tabIds) ? group.tabIds : [];
+  const tabCount = tabIds.length;
+  const isActiveGroup = tabIds.indexOf(activeTabId) !== -1;
+  const previewTabs = tabIds.slice(0, 4);
   const previews = previewTabs.map((id) => {
     const tab = tabs.find((t) => t.id === id);
     if (!tab) return '';
@@ -1549,7 +1689,7 @@ function groupCardMarkup(group) {
   }).join('');
 
   return `
-    <div class="tab-card group-preview" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
+    <div class="tab-card group-preview${isActiveGroup ? ' is-active' : ''}" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
       <div class="group-icon">
         ${svgIcon('layers', 'icon')}
       </div>
@@ -1567,8 +1707,10 @@ function groupCardMarkup(group) {
 }
 
 function renderTabs() {
+  if (!dom.tabsList) return;
   updateTabBadge();
-  dom.tabsEmpty.classList.toggle('hidden', tabs.length > 0);
+  const hasTabs = tabs.length > 0;
+  dom.tabsEmpty.classList.toggle('hidden', hasTabs);
   dom.tabSelectBar.classList.toggle('hidden', !tabSelectionMode);
   dom.tabSelectCount.textContent = tabSelection.size + ' selected';
   dom.tabGroupBtn.disabled = tabSelection.size < 2;
@@ -1604,30 +1746,48 @@ function renderTabs() {
     return;
   }
 
+  const groups = validTabGroups();
   const pinned = tabs.filter((tab) => metaById[tab.id].pinned === true);
   const grouped = new Set();
-  tabGroups.forEach((group) => group.tabIds.forEach((id) => grouped.add(id)));
+  groups.forEach((group) => group.tabIds.forEach((id) => grouped.add(id)));
   const ungrouped = tabs.filter((tab) => !metaById[tab.id].pinned && !grouped.has(tab.id));
 
   let html = '';
-  if (pinned.length) {
-    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('pin', 'icon') + '</span><span class="tab-section-label">Pinned</span></div>';
-    html += '<div class="tab-grid is-pinned">' + pinned.map(tabCardMarkup).join('') + '</div>';
-  }
-  if (tabGroups.length) {
-    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('layers', 'icon') + '</span><span class="tab-section-label">Groups</span></div>';
-    tabGroups.forEach((group) => { html += groupCardMarkup(group); });
-  }
-  if (ungrouped.length) {
-    html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span></div>';
-    html += '<div class="tab-grid">' + ungrouped.map(tabCardMarkup).join('') + '</div>';
+  try {
+    /* Groups live in a horizontally scrollable carousel at the top of the
+     * sheet; with no groups the whole section stays out of the way. */
+    if (groups.length) {
+      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('layers', 'icon') + '</span><span class="tab-section-label">Groups</span><span class="tab-section-count">' + groups.length + '</span></div>';
+      html += '<div class="tab-group-carousel" aria-label="Tab groups">' + groups.map(groupCardMarkup).join('') + '</div>';
+    }
+    if (pinned.length) {
+      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('pin', 'icon') + '</span><span class="tab-section-label">Pinned</span></div>';
+      html += '<div class="tab-grid is-pinned">' + pinned.map(tabCardMarkup).join('') + '</div>';
+    }
+    if (ungrouped.length) {
+      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span><span class="tab-section-count">' + ungrouped.length + '</span></div>';
+      html += '<div class="tab-grid">' + ungrouped.map(tabCardMarkup).join('') + '</div>';
+    }
+  } catch (error) {
+    /* One malformed card must never blank the whole tab manager. */
+    console.warn('[4keeper] Tab render fell back to a flat list:', error);
+    html = '';
+    try {
+      if (tabs.length) {
+        html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span></div>';
+        html += '<div class="tab-grid">' + tabs.map(tabCardMarkup).join('') + '</div>';
+      }
+    } catch (inner) {
+      html = '';
+    }
   }
   dom.tabsList.innerHTML = html;
+  dom.tabsEmpty.classList.toggle('hidden', hasTabs);
 }
 
 async function createTabWithUrl(url, activate) {
   await mountBrowser();
-  const target = url || getHomePage();
+  const target = buildHomeUrl(url || getHomePage());
   const shouldActivate = activate !== false;
   try {
     if (shouldActivate) await callPlugin('createTab', { url: target, activate: true });
@@ -1648,7 +1808,7 @@ async function createTabWithUrl(url, activate) {
 }
 
 async function navigate(raw) {
-  const url = normalizeUrl(raw);
+  const url = buildHomeUrl(normalizeUrl(raw));
   if (!url) return;
 
   hideSuggestions();
@@ -3774,7 +3934,12 @@ async function restoreSession() {
     return;
   }
 
-  const saved = Array.isArray(session.tabs) ? session.tabs.filter((tab) => isHttpUrl(tab.url)).slice(0, 8) : [];
+  const saved = Array.isArray(session.tabs)
+    ? session.tabs
+        .filter((tab) => tab && isHttpUrl(tab.url))
+        .map((tab) => ({ url: buildHomeUrl(tab.url), title: tab.title || '' }))
+        .slice(0, 8)
+    : [];
   if (settings.startup === 'home' || !saved.length) {
     await createTabWithUrl(getHomePage(), true);
     return;
@@ -3798,7 +3963,7 @@ async function restoreSession() {
   }
 
   await refreshTabs();
-  if (!tabs.length) await createTabWithUrl(getHomePage(), true);
+  await ensureTabExists();
 }
 
 async function boot() {
@@ -3827,6 +3992,9 @@ async function boot() {
   }
 
   await refreshTabs().catch(() => {});
+  if (!tabs.length) await ensureTabExists();
+  tabsReady = true;
+  renderTabs();
   syncActiveTabUi();
   const tab = activeTab();
   setNav(!!(tab && tab.canGoBack), !!(tab && tab.canGoForward));
@@ -3869,4 +4037,4 @@ async function boot() {
   });
 }
 
-boot();
+bootPromise = boot();

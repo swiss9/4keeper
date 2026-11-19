@@ -687,12 +687,16 @@ select {
 
 .tab-card.is-active {
   background: var(--surface-2);
-  border-color: var(--border-strong);
-  box-shadow: inset 0 0 0 1px rgba(250, 250, 250, 0.38);
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--text), 0 10px 24px rgba(0, 0, 0, 0.42);
 }
 
 [data-theme="light"] .tab-card.is-active {
-  box-shadow: inset 0 0 0 1px rgba(17, 17, 20, 0.45);
+  box-shadow: 0 0 0 1px var(--text), 0 10px 22px rgba(15, 15, 20, 0.16);
+}
+
+.tab-card.is-active .tab-host {
+  color: var(--text);
 }
 
 .tab-preview {
@@ -2264,6 +2268,66 @@ html.page-behind .browser {
   font-size: 12px;
 }
 
+.tab-section-count {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Groups sit in a horizontally scrollable carousel at the top of the sheet. */
+.tab-group-carousel {
+  display: flex;
+  gap: 10px;
+  margin: 0 -4px;
+  padding: 2px 4px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-group-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-group-carousel > .group-preview {
+  flex: 0 0 auto;
+  width: min(74vw, 268px);
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  height: auto;
+  min-height: 74px;
+  padding: 10px;
+}
+
+.tab-group-carousel .group-preview .tab-meta {
+  flex: 1 1 auto;
+  padding: 0;
+  gap: 4px;
+}
+
+.tab-group-carousel .group-preview .tab-meta-title {
+  gap: 6px;
+}
+
+.tab-group-carousel .group-preview .tab-host {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-group-carousel .group-preview .icon-btn-sm {
+  flex: 0 0 auto;
+}
+
 .tab-grid.is-pinned .tab-preview {
   height: 62px;
   border-bottom-color: transparent;
@@ -2357,6 +2421,10 @@ html.page-behind .browser {
 
 .group-preview {
   height: 96px;
+}
+
+.tab-group-carousel .group-preview {
+  height: auto;
 }
 
 .group-icon {

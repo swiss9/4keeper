@@ -22,6 +22,7 @@ import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.util.Base64;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -138,6 +139,74 @@ public class EmbeddedWebViewPlugin extends Plugin {
         Tab(int id, WebView view) {
             this.id = id;
             this.view = view;
+        }
+    }
+
+    /* Swipe down at the top of a page to reload it, the way a downloader-first
+     * browser is expected to behave. The listener only observes touches and
+     * always lets the WebView handle them, so normal scrolling is untouched. */
+    private class PullToRefreshListener implements View.OnTouchListener {
+        private static final int THRESHOLD_DP = 72;
+
+        private final WebView view;
+        private float startX = 0f;
+        private float startY = 0f;
+        private float pullDistance = 0f;
+        private boolean tracking = false;
+        private boolean armed = false;
+
+        PullToRefreshListener(WebView view) {
+            this.view = view;
+        }
+
+        @Override
+        public boolean onTouch(View target, MotionEvent event) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    startX = event.getX();
+                    startY = event.getY();
+                    pullDistance = 0f;
+                    tracking = event.getPointerCount() == 1;
+                    armed = tracking && !view.canScrollVertically(-1) && view.getScrollY() <= 0;
+                    return false;
+                case MotionEvent.ACTION_MOVE:
+                    if (!tracking || !armed) return false;
+                    if (event.getPointerCount() > 1) {
+                        reset();
+                        return false;
+                    }
+                    float dy = event.getY() - startY;
+                    float dx = Math.abs(event.getX() - startX);
+                    if (dy <= 0 || dx > dy * 1.5f) {
+                        pullDistance = 0f;
+                        return false;
+                    }
+                    pullDistance = Math.max(pullDistance, dy);
+                    return false;
+                case MotionEvent.ACTION_UP:
+                    boolean reload = tracking && armed
+                        && pullDistance > dp(THRESHOLD_DP)
+                        && !view.canScrollVertically(-1);
+                    reset();
+                    if (reload) {
+                        String url = view.getUrl();
+                        if (url != null && !url.isEmpty() && !url.startsWith("about:")) {
+                            view.reload();
+                        }
+                    }
+                    return false;
+                case MotionEvent.ACTION_CANCEL:
+                    reset();
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private void reset() {
+            tracking = false;
+            armed = false;
+            pullDistance = 0f;
         }
     }
 
@@ -290,8 +359,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
         settings.setJavaScriptEnabled(javaScriptEnabled);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setLoadWithOverviewMode(true);
+        /* Desktop mode must not squeeze the whole page into the viewport:
+         * overview mode is what shrinks a wide desktop layout to a tiny,
+         * unreadable scale. Keep the wide viewport but let the page render at
+         * its natural width and scroll instead. */
         settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(!desktopMode);
         settings.setBuiltInZoomControls(pinchZoomEnabled);
         settings.setSupportZoom(pinchZoomEnabled);
         settings.setDisplayZoomControls(zoomControlsVisible);
@@ -307,6 +380,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         } else {
             settings.setUserAgentString(null);
         }
+        view.setInitialScale(0);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 settings.setSafeBrowsingEnabled(safeBrowsingEnabled);
@@ -393,6 +467,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         view.setDownloadListener((downloadUrl, userAgent, contentDisposition, mimeType, contentLength) ->
             enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType, id)
         );
+        view.setOnTouchListener(new PullToRefreshListener(view));
         view.setVisibility(View.INVISIBLE);
 
         Tab tab = new Tab(id, view);
@@ -1106,11 +1181,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         persistSettings();
         getActivity().runOnUiThread(() -> {
             for (Tab tab : tabs.values()) {
-                tab.view.getSettings().setUserAgentString(enabled ? DESKTOP_USER_AGENT : null);
-            }
-            Tab tab = getActiveTab();
-            if (tab != null) {
-                tab.view.reload();
+                applySettingsTo(tab.view);
             }
         });
         call.resolve();

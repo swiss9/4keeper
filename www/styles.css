@@ -2608,3 +2608,185 @@ html.page-behind .browser {
   background: var(--success);
   box-shadow: 0 0 0 2px var(--bg-elev);
 }
+
+/* ------------------------------------- Tab manager: 1DM-style drawer list */
+
+/* Tabs read as a single compact vertical list: favicon, title, actions. */
+.tab-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px 10px;
+}
+
+.tab-card.tab-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  min-height: 58px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 14px;
+  overflow: visible;
+}
+
+.tab-card.tab-row.is-active {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.tab-row .tab-favicon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tab-row .tab-favicon .favicon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.tab-row .tab-favicon .favicon img {
+  width: 17px;
+  height: 17px;
+}
+
+.tab-row .tab-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  gap: 2px;
+}
+
+.tab-row .tab-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.tab-row .tab-host {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.tab-row .tab-badges {
+  position: static;
+  flex: 0 0 auto;
+}
+
+.tab-card.tab-row .tab-check {
+  position: static;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+}
+
+.tab-card.tab-row .tab-close {
+  position: static;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tab-card.tab-row .tab-close:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* Row actions: add-to-group folder and close. */
+.tab-row-action {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+.tab-row-action:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab-row-action.is-grouped {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tab-row-action .icon {
+  width: 17px;
+  height: 17px;
+}
+
+/* Pinned rows keep the same density as regular rows. */
+.tab-grid.is-pinned .tab-row .tab-title {
+  font-size: 13.5px;
+}
+
+.tab-grid.is-pinned .tab-row .tab-host {
+  display: block;
+}
+
+/* Groups: plain vertical rows above the tab list, no carousel. */
+.tab-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px 6px;
+}
+
+.tab-card.group-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  min-height: 56px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 14px;
+  overflow: visible;
+}
+
+.tab-card.group-row.is-active {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.group-row .group-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.group-row .group-icon .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.group-row .tab-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  gap: 2px;
+}
+
+.group-row .tab-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}

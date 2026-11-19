@@ -59,42 +59,10 @@ const SEARCH_LANGUAGES = [
   { value: 'id', label: 'Indonesian' }
 ];
 
-const SEARCH_REGIONS = [
-  { value: '', label: 'Any region' },
-  { value: 'US', label: 'United States (US)' },
-  { value: 'GB', label: 'United Kingdom (UK)' },
-  { value: 'CA', label: 'Canada (CA)' },
-  { value: 'AU', label: 'Australia (AU)' },
-  { value: 'NZ', label: 'New Zealand (NZ)' },
-  { value: 'IE', label: 'Ireland (IE)' },
-  { value: 'DE', label: 'Germany (DE)' },
-  { value: 'FR', label: 'France (FR)' },
-  { value: 'ES', label: 'Spain (ES)' },
-  { value: 'IT', label: 'Italy (IT)' },
-  { value: 'NL', label: 'Netherlands (NL)' },
-  { value: 'SE', label: 'Sweden (SE)' },
-  { value: 'CH', label: 'Switzerland (CH)' },
-  { value: 'AT', label: 'Austria (AT)' },
-  { value: 'BR', label: 'Brazil (BR)' },
-  { value: 'MX', label: 'Mexico (MX)' },
-  { value: 'IN', label: 'India (IN)' },
-  { value: 'JP', label: 'Japan (JP)' },
-  { value: 'KR', label: 'South Korea (KR)' },
-  { value: 'SG', label: 'Singapore (SG)' },
-  { value: 'ZA', label: 'South Africa (ZA)' },
-  { value: 'AE', label: 'United Arab Emirates (AE)' }
-];
-
 function searchLanguageLabel() {
   const value = String(settings.searchLanguage || '');
   const found = SEARCH_LANGUAGES.find((item) => item.value === value);
   return found ? found.label : 'Any language';
-}
-
-function searchRegionLabel() {
-  const value = String(settings.searchRegion || '');
-  const found = SEARCH_REGIONS.find((item) => item.value === value);
-  return found ? found.label : 'Any region';
 }
 
 const DEFAULT_SETTINGS = {
@@ -102,7 +70,6 @@ const DEFAULT_SETTINGS = {
   density: 'comfortable',
   searchEngine: 'duckduckgo',
   searchLanguage: 'en',
-  searchRegion: '',
   homePage: '',
   startup: 'restore',
   suggestions: true,
@@ -384,16 +351,14 @@ function getEngine() {
 function buildSearchUrl(query) {
   let url = getEngine().search + encodeURIComponent(query);
   const language = String(settings.searchLanguage || '').trim();
-  const region = String(settings.searchRegion || '').trim();
   if (language) url += '&hl=' + encodeURIComponent(language);
-  if (region) url += '&gl=' + encodeURIComponent(region.toUpperCase());
   return url;
 }
 
 const GOOGLE_HOME_HOST = /^google(\.[a-z]{2,4}){1,2}$/i;
 
 /* Google serves a country-specific homepage based on the IP. `/ncr` keeps it
- * neutral, and hl/gl apply the saved search language + region on every load. */
+ * neutral, and hl applies the saved search language on every load. */
 function isGoogleHomeUrl(url) {
   if (!url || typeof url !== 'string') return false;
   try {
@@ -415,10 +380,8 @@ function buildHomeUrl(rawUrl) {
   const url = String(rawUrl || '').trim();
   if (!url || !isGoogleHomeUrl(url)) return url;
   const language = String(settings.searchLanguage || '').trim();
-  const region = String(settings.searchRegion || '').trim();
   const params = [];
   if (language) params.push('hl=' + encodeURIComponent(language));
-  if (region) params.push('gl=' + encodeURIComponent(region.toLowerCase()));
   return 'https://www.google.com/ncr' + (params.length ? '?' + params.join('&') : '');
 }
 
@@ -1146,19 +1109,29 @@ function openMenu() {
   syncNativeVisibility();
 }
 
-function toggleDesktopSite() {
+async function toggleDesktopSite() {
   const next = !settings.desktopMode;
   settings = Object.assign({}, settings, { desktopMode: next });
   Store.save('settings');
   readingModeOn = false;
   updateMenuModes();
-  callPlugin('setDesktopMode', { enabled: next })
-    .catch(() => pushNativeSettings(true))
-    .then(() => {
-      updateMenuModes();
-      toast(next ? 'Desktop site on' : 'Desktop site off');
-    });
   closeMenu();
+  try {
+    await callPlugin('setDesktopMode', { enabled: next });
+  } catch (error) {
+    pushNativeSettings(true);
+  }
+  /* A User-Agent change only applies to a fresh document, so reload after the
+   * native viewport settings are in place. The shell chrome lives in its own
+   * WebView and keeps its size; only the page WebView is reloaded. */
+  try {
+    await callPlugin('reload');
+  } catch (error) {
+    /* the user can still refresh manually */
+  }
+  await mountBrowser(true);
+  updateMenuModes();
+  toast(next ? 'Desktop site on' : 'Desktop site off');
 }
 
 function refreshReadingState() {
@@ -1687,49 +1660,39 @@ function tabCardMarkup(tab) {
   const meta = getTabMeta(tab.id);
   const isPinned = meta.pinned === true;
   const isSelected = tabSelectionMode && tabSelection.has(tab.id);
-  const inGroup = tabGroupFilter && meta.groupId === tabGroupFilter;
-  const isGroupCard = false;
+  const group = meta.groupId ? getTabGroup(meta.groupId) : null;
 
   const title = tab.title || 'New tab';
   const host = hostOf(tab.url) || (isActive ? 'Start page' : 'Empty tab');
   const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
-  const favicon = host ? favicons[hostOf(tab.url)] : null;
-  const preview = favicon
-    ? `<span class="tab-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
-    : `<span class="tab-monogram">${escapeHtml(monogram)}</span>`;
-  const miniFavicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
-
-  const pinButton = `
-    <button class="tab-pin${isPinned ? ' is-pinned' : ''}" type="button" data-tab-pin="${tab.id}" aria-label="${isPinned ? 'Unpin tab' : 'Pin tab'}">
-      ${svgIcon('pin', 'icon icon-sm')}
-    </button>`;
+  const favicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
+  const icon = favicon || `<span class="favicon">${escapeHtml(monogram)}</span>`;
 
   const checkButton = tabSelectionMode
     ? `<button class="tab-check" type="button" data-tab-check="${tab.id}" aria-label="${isSelected ? 'Deselect tab' : 'Select tab'}"><svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></button>`
     : '';
 
-  const classes = 'tab-card' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '') + (isSelected ? ' is-selected' : '') + (tabSelectionMode ? ' is-selecting' : '');
+  const classes = 'tab-card tab-row' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '') + (isSelected ? ' is-selected' : '') + (tabSelectionMode ? ' is-selecting' : '');
   const badges = tabDownloadBadgesMarkup(tab.id);
   const mediaHint = mediaHintForTab(tab.id);
+  const groupHint = group ? ' · ' + group.name : '';
+  const groupLabel = group ? 'Change group: ' + group.name : 'Add to group';
 
   return `
-    <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title + mediaHint)}" aria-pressed="${isActive}"${isGroupCard ? ' data-group-card="true"' : ''}>
-      ${pinButton}
+    <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title + mediaHint)}" aria-pressed="${isActive}">
       ${checkButton}
-      <div class="tab-preview">
-        ${preview}
-        ${badges}
-        <button class="tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
-          ${svgIcon('close', 'icon icon-xs')}
-        </button>
-      </div>
+      <span class="tab-favicon">${icon}</span>
       <div class="tab-meta">
-        <div class="tab-meta-title">
-          ${miniFavicon}
-          <span class="tab-title">${escapeHtml(title)}</span>
-        </div>
-        <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}</div>
+        <div class="tab-title">${escapeHtml(title)}</div>
+        <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}${escapeHtml(groupHint)}</div>
       </div>
+      ${badges}
+      <button class="tab-row-action${group ? ' is-grouped' : ''}" type="button" data-tab-group="${tab.id}" aria-label="${escapeHtml(groupLabel + ': ' + title)}" title="${escapeHtml(group ? group.name : 'Add to group')}">
+        ${svgIcon(group ? 'layers' : 'folder', 'icon icon-sm')}
+      </button>
+      <button class="tab-row-action tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
+        ${svgIcon('close', 'icon icon-sm')}
+      </button>
     </div>`;
 }
 
@@ -1779,6 +1742,88 @@ function groupSelectedTabs() {
     }
   });
 }
+function assignTabToGroupId(tabId, groupId) {
+  const group = getTabGroup(groupId);
+  if (!group) return;
+  const previousId = getTabMeta(tabId).groupId;
+  if (previousId && previousId !== groupId) {
+    const previous = getTabGroup(previousId);
+    if (previous) previous.tabIds = previous.tabIds.filter((id) => id !== tabId);
+  }
+  if (!group.tabIds.includes(tabId)) group.tabIds.push(tabId);
+  tabGroups = tabGroups.filter((item) => item.id === groupId || item.tabIds.length > 0);
+  setTabMeta(tabId, { groupId });
+  Store.save('tabGroups');
+  renderTabs();
+  toast('Added to ' + group.name);
+}
+
+function removeTabFromGroup(tabId) {
+  const meta = getTabMeta(tabId);
+  if (!meta.groupId) return;
+  const group = getTabGroup(meta.groupId);
+  if (group) group.tabIds = group.tabIds.filter((id) => id !== tabId);
+  tabGroups = tabGroups.filter((item) => item.tabIds.length > 0);
+  setTabMeta(tabId, { groupId: null });
+  Store.save('tabGroups');
+  renderTabs();
+  toast('Removed from group');
+}
+
+function createGroupForTab(tabId) {
+  openDialog({
+    title: 'New tab group',
+    message: 'Enter a name for this group.',
+    confirmLabel: 'Create group',
+    body: (body) => {
+      const label = el('label', 'dialog-field-label', 'Group name');
+      label.setAttribute('for', 'groupNameInput');
+      const input = el('input', 'text-input');
+      input.id = 'groupNameInput';
+      input.type = 'text';
+      input.maxLength = 40;
+      input.placeholder = 'e.g. Work, Research, Shopping';
+      input.autocomplete = 'off';
+      input.value = 'Tab Group';
+      body.append(label, input);
+      window.setTimeout(() => { input.focus(); input.select(); }, 60);
+    },
+    onConfirm: () => {
+      const input = $('groupNameInput');
+      const name = input ? input.value.trim() : '';
+      if (!name) {
+        toast('Enter a group name');
+        return false;
+      }
+      const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      tabGroups.push({ id: groupId, name, tabIds: [tabId], createdAt: Date.now() });
+      setTabMeta(tabId, { groupId });
+      Store.save('tabGroups');
+      renderTabs();
+      toast('Group created');
+    }
+  });
+}
+
+function assignTabToGroup(tabId) {
+  const meta = getTabMeta(tabId);
+  const groups = validTabGroups();
+  const options = groups.map((group) => ({
+    value: group.id,
+    label: group.name,
+    desc: group.tabIds.length + (group.tabIds.length === 1 ? ' tab' : ' tabs') + (meta.groupId === group.id ? ' · current' : '')
+  }));
+  options.push({ value: '__new', label: 'New group…', desc: 'Create a group and add this tab' });
+  if (meta.groupId) {
+    options.push({ value: '__remove', label: 'Remove from group', desc: 'Keep this tab ungrouped' });
+  }
+  openChoice('Add to group', options, meta.groupId || '', (value) => {
+    if (value === '__new') createGroupForTab(tabId);
+    else if (value === '__remove') removeTabFromGroup(tabId);
+    else assignTabToGroupId(tabId, value);
+  });
+}
+
 function validTabGroups() {
   return (Array.isArray(tabGroups) ? tabGroups : []).filter(
     (group) => group && group.id && group.name && Array.isArray(group.tabIds)
@@ -1789,32 +1834,20 @@ function groupCardMarkup(group) {
   const tabIds = Array.isArray(group.tabIds) ? group.tabIds : [];
   const tabCount = tabIds.length;
   const isActiveGroup = tabIds.indexOf(activeTabId) !== -1;
-  const previewTabs = tabIds.slice(0, 4);
-  const previews = previewTabs.map((id) => {
-    const tab = tabs.find((t) => t.id === id);
-    if (!tab) return '';
-    const host = hostOf(tab.url) || 'Empty';
-    const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
-    const favicon = host ? favicons[hostOf(tab.url)] : null;
-    return favicon
-      ? `<span class="group-mini-monogram"><img src="${escapeHtml(favicon)}" alt=""></span>`
-      : `<span class="group-mini-monogram">${escapeHtml(monogram)}</span>`;
-  }).join('');
+  const firstTab = tabs.find((tab) => tab.id === tabIds[0]);
+  const host = firstTab ? hostOf(firstTab.url) : '';
 
   return `
-    <div class="tab-card group-preview${isActiveGroup ? ' is-active' : ''}" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
-      <div class="group-icon">
+    <div class="tab-card group-row${isActiveGroup ? ' is-active' : ''}" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
+      <span class="group-icon">
         ${svgIcon('layers', 'icon')}
-      </div>
+      </span>
       <div class="tab-meta">
-        <div class="tab-meta-title">
-          <span class="tab-title">${escapeHtml(group.name)}</span>
-          <span class="tab-host">${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}</span>
-        </div>
-        <div class="tab-host">${previews}</div>
+        <div class="tab-title">${escapeHtml(group.name)}</div>
+        <div class="tab-host">${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}${host ? ' · ' + escapeHtml(host) : ''}</div>
       </div>
-      <button class="icon-btn icon-btn-sm" type="button" data-group-close="${group.id}" aria-label="Close group">
-        ${svgIcon('close', 'icon icon-xs')}
+      <button class="tab-row-action" type="button" data-group-close="${group.id}" aria-label="Close group: ${escapeHtml(group.name)}">
+        ${svgIcon('close', 'icon icon-sm')}
       </button>
     </div>`;
 }
@@ -1868,11 +1901,11 @@ function renderTabs() {
 
   let html = '';
   try {
-    /* Groups live in a horizontally scrollable carousel at the top of the
-     * sheet; with no groups the whole section stays out of the way. */
+    /* Groups sit in a simple vertical list at the top of the sheet; with no
+     * groups the whole section stays out of the way. */
     if (groups.length) {
       html += '<div class="tab-section-head"><span class="icon">' + svgIcon('layers', 'icon') + '</span><span class="tab-section-label">Groups</span><span class="tab-section-count">' + groups.length + '</span></div>';
-      html += '<div class="tab-group-carousel" aria-label="Tab groups">' + groups.map(groupCardMarkup).join('') + '</div>';
+      html += '<div class="tab-group-list" aria-label="Tab groups">' + groups.map(groupCardMarkup).join('') + '</div>';
     }
     if (pinned.length) {
       html += '<div class="tab-section-head"><span class="icon">' + svgIcon('pin', 'icon') + '</span><span class="tab-section-label">Pinned</span></div>';
@@ -3147,9 +3180,6 @@ function settingsPageSearch() {
     settingSection('Search language', `
       ${settingRowButton('globe', 'Search language', 'Preferred language for results', searchLanguageLabel(), 'searchLanguage')}
     `) +
-    settingSection('Search region', `
-      ${settingRowButton('globe', 'Search region', 'Preferred region for results', searchRegionLabel(), 'searchRegion')}
-    `) +
     settingSection('Homepage', `
       ${settingRowButton('link', 'Homepage', 'Opened by the Home button', settings.homePage || getEngine().home, 'homePage')}
       ${settingRowButton('text', 'On startup', 'What opens when the app starts', startupLabel(), 'startup')}
@@ -3350,9 +3380,6 @@ function handleSettingsAction(action) {
       break;
     case 'searchLanguage':
       openChoice('Search language', SEARCH_LANGUAGES, String(settings.searchLanguage || ''), (value) => updateSetting({ searchLanguage: value }, { rerender: true, toastMessage: 'Search language updated' }));
-      break;
-    case 'searchRegion':
-      openChoice('Search region', SEARCH_REGIONS, String(settings.searchRegion || ''), (value) => updateSetting({ searchRegion: value }, { rerender: true, toastMessage: 'Search region updated' }));
       break;
     case 'cookies':
       openChoice('Cookies', [
@@ -3560,6 +3587,12 @@ function attachUiListeners() {
       const meta = getTabMeta(id);
       setTabMeta(id, { pinned: !meta.pinned });
       renderTabs();
+      return;
+    }
+    const groupAssign = event.target.closest('[data-tab-group]');
+    if (groupAssign) {
+      event.stopPropagation();
+      assignTabToGroup(Number(groupAssign.getAttribute('data-tab-group')));
       return;
     }
     const checkButton = event.target.closest('[data-tab-check]');

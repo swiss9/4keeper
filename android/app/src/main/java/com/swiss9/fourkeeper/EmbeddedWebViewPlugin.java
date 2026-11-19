@@ -1,9 +1,12 @@
 package com.swiss9.fourkeeper;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -15,6 +18,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.StatFs;
+import android.provider.DocumentsContract;
 import android.util.Base64;
 import android.util.TypedValue;
 import android.view.View;
@@ -32,6 +37,9 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
@@ -42,6 +50,7 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import org.json.JSONArray;
@@ -50,13 +59,17 @@ import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @CapacitorPlugin(name = "EmbeddedWebView")
 public class EmbeddedWebViewPlugin extends Plugin {
@@ -65,16 +78,6 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String APP_DATA_PREFS = "4keeper_appdata";
     private static final String DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
-    private static final String READING_MODE_ENABLE_JS =
-        "(function(){try{var s=document.getElementById('4k-reading-style')||document.createElement('style');"
-        + "s.id='4k-reading-style';"
-        + "s.textContent='aside,[role=\\\"complementary\\\"],[class*=\\\"sidebar\\\"],[id*=\\\"sidebar\\\"],[class*=\\\"side-col\\\"],[class*=\\\"col-sidebar\\\"]{display:none!important}'"
-        + "+';article,main{max-width:100%!important;margin:0 auto!important}';"
-        + "document.head.appendChild(s);}catch(e){}})();";
-
-    private static final String READING_MODE_DISABLE_JS =
-        "(function(){try{var s=document.getElementById('4k-reading-style');if(s&&s.parentNode){s.parentNode.removeChild(s);}}catch(e){}})();";
 
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
@@ -140,10 +143,38 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean pinchZoomEnabled = true;
     private boolean zoomControlsVisible = false;
     private boolean downloadNotifications = true;
+    private boolean autoOpenPdf = false;
+    private boolean autoOpenDownload = false;
+    private boolean parallelDownloads = true;
+    private boolean askDownloadLocation = false;
+    private String downloadLocation = "";
     private int textZoom = 100;
     private String cookiesMode = "all";
 
+    private boolean uiOverlayActive = false;
+    private String readingHelperScript = null;
+
     private SharedPreferences prefs;
+    private ExecutorService downloadExecutor;
+    private final Object serialDownloadLock = new Object();
+    private final Object downloadRecordLock = new Object();
+    private ActivityResultLauncher<String> createDocumentLauncher;
+    private PendingDownload pendingDownload;
+    private BroadcastReceiver downloadReceiver;
+
+    private static class PendingDownload {
+        final String url;
+        final String userAgent;
+        final String filename;
+        final String mime;
+
+        PendingDownload(String url, String userAgent, String filename, String mime) {
+            this.url = url;
+            this.userAgent = userAgent;
+            this.filename = filename;
+            this.mime = mime;
+        }
+    }
 
     @Override
     public void load() {
@@ -157,8 +188,29 @@ public class EmbeddedWebViewPlugin extends Plugin {
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
         zoomControlsVisible = prefs.getBoolean("zoomControlsVisible", false);
         downloadNotifications = prefs.getBoolean("downloadNotifications", true);
+        autoOpenPdf = prefs.getBoolean("autoOpenPdf", false);
+        autoOpenDownload = prefs.getBoolean("autoOpenDownload", false);
+        parallelDownloads = prefs.getBoolean("parallelDownloads", true);
+        askDownloadLocation = prefs.getBoolean("askDownloadLocation", false);
+        downloadLocation = prefs.getString("downloadLocation", "");
         textZoom = prefs.getInt("textZoom", 100);
         cookiesMode = prefs.getString("cookiesMode", "all");
+
+        downloadExecutor = Executors.newFixedThreadPool(4);
+        registerDownloadWatcher();
+        registerCreateDocumentLauncher();
+        makeBridgeTransparent();
+        markStaleDownloads();
+    }
+
+    private void makeBridgeTransparent() {
+        try {
+            WebView bridgeView = getBridge().getWebView();
+            if (bridgeView != null) {
+                bridgeView.setBackgroundColor(Color.TRANSPARENT);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private SharedPreferences appData() {
@@ -189,6 +241,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("pinchZoomEnabled", pinchZoomEnabled)
             .putBoolean("zoomControlsVisible", zoomControlsVisible)
             .putBoolean("downloadNotifications", downloadNotifications)
+            .putBoolean("autoOpenPdf", autoOpenPdf)
+            .putBoolean("autoOpenDownload", autoOpenDownload)
+            .putBoolean("parallelDownloads", parallelDownloads)
+            .putBoolean("askDownloadLocation", askDownloadLocation)
+            .putString("downloadLocation", downloadLocation)
             .putInt("textZoom", textZoom)
             .putString("cookiesMode", cookiesMode)
             .apply();
@@ -260,10 +317,45 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
+    private View capacitorContainer() {
+        View root = rootView();
+        View current = null;
+        try {
+            current = getBridge().getWebView();
+        } catch (Exception ignored) {
+        }
+        if (root == null || current == null) return null;
+        while (current.getParent() instanceof View) {
+            View parent = (View) current.getParent();
+            if (parent == root) return current;
+            current = parent;
+        }
+        return current;
+    }
+
+    private void bringOverlayToFront() {
+        View container = capacitorContainer();
+        if (container != null) container.bringToFront();
+    }
+
+    private void bringPageToFront() {
+        Tab tab = getActiveTab();
+        if (tab != null) {
+            tab.view.bringToFront();
+        } else {
+            bringOverlayToFront();
+        }
+    }
+
     private void activateTab(Tab tab) {
         if (tab == null) return;
         activeTabId = tab.id;
         applyActiveVisibility();
+        if (!uiOverlayActive) {
+            tab.view.bringToFront();
+        } else {
+            bringOverlayToFront();
+        }
     }
 
     private Tab createTabInternal(String url) {
@@ -287,6 +379,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         FrameLayout root = rootView();
         if (root != null) {
             root.addView(view, boundsParams());
+        }
+        if (uiOverlayActive) {
+            bringOverlayToFront();
         }
 
         if (url != null && !url.trim().isEmpty()) {
@@ -403,9 +498,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             Tab tab = tabs.get(tabId);
-            if (tab != null && url != null) tab.url = url;
+            if (tab != null && url != null && !"about:blank".equals(url) && !url.startsWith("data:")) {
+                tab.url = url;
+            }
             JSObject data = new JSObject();
             data.put("tabId", tabId);
+            data.put("activeTabId", activeTabId);
             data.put("url", url == null ? "" : url);
             notifyListeners("pageStarted", data);
         }
@@ -420,6 +518,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             view.evaluateJavascript(TAP_STYLE_JS, null);
             JSObject data = tabState(tab);
             data.put("tabId", tabId);
+            data.put("activeTabId", activeTabId);
             data.put("canGoBack", view.canGoBack());
             data.put("canGoForward", view.canGoForward());
             data.put("title", view.getTitle() == null ? "" : view.getTitle());
@@ -437,6 +536,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             String message = String.valueOf(error.getDescription());
             JSObject data = new JSObject();
             data.put("tabId", tabId);
+            data.put("activeTabId", activeTabId);
             data.put("url", failedUrl);
             data.put("code", error.getErrorCode());
             data.put("message", message);
@@ -478,6 +578,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         public void onProgressChanged(WebView view, int newProgress) {
             JSObject data = new JSObject();
             data.put("tabId", tabId);
+            data.put("activeTabId", activeTabId);
             data.put("progress", newProgress);
             notifyListeners("loadProgress", data);
         }
@@ -488,6 +589,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (tab != null && title != null) tab.title = title;
             JSObject data = new JSObject();
             data.put("tabId", tabId);
+            data.put("activeTabId", activeTabId);
             data.put("title", title == null ? "" : title);
             notifyListeners("titleChanged", data);
         }
@@ -725,6 +827,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setUiOverlay(PluginCall call) {
+        boolean overlay = call.getBoolean("active", false);
+        getActivity().runOnUiThread(() -> {
+            makeBridgeTransparent();
+            uiOverlayActive = overlay;
+            if (overlay) {
+                bringOverlayToFront();
+            } else {
+                bringPageToFront();
+            }
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
     public void setWindowBackground(PluginCall call) {
         String value = call.getString("color", "");
         int color;
@@ -791,6 +908,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("zoomControls")) zoomControlsVisible = data.optBoolean("zoomControls", false);
         if (data.has("pinchZoom")) pinchZoomEnabled = data.optBoolean("pinchZoom", true);
         if (data.has("downloadNotifications")) downloadNotifications = data.optBoolean("downloadNotifications", true);
+        if (data.has("autoOpenPdf")) autoOpenPdf = data.optBoolean("autoOpenPdf", false);
+        if (data.has("autoOpenDownload")) autoOpenDownload = data.optBoolean("autoOpenDownload", false);
+        if (data.has("parallelDownloads")) parallelDownloads = data.optBoolean("parallelDownloads", true);
+        if (data.has("askDownloadLocation")) askDownloadLocation = data.optBoolean("askDownloadLocation", false);
+        if (data.has("downloadLocation")) downloadLocation = data.optString("downloadLocation", "");
 
         persistSettings();
         getActivity().runOnUiThread(() -> {
@@ -846,18 +968,68 @@ public class EmbeddedWebViewPlugin extends Plugin {
         call.resolve();
     }
 
+    private String readingHelperScript() {
+        if (readingHelperScript != null) return readingHelperScript;
+        try (InputStream in = getContext().getAssets().open("4k-reading.js")) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            readingHelperScript = out.toString("UTF-8");
+        } catch (Exception error) {
+            readingHelperScript = "";
+        }
+        return readingHelperScript;
+    }
+
     @PluginMethod
     public void toggleReadingMode(PluginCall call) {
         boolean enabled = call.getBoolean("enabled", true);
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
             if (tab == null) {
-                call.resolve();
+                JSObject result = new JSObject();
+                result.put("applied", false);
+                call.resolve(result);
                 return;
             }
-            String js = enabled ? READING_MODE_ENABLE_JS : READING_MODE_DISABLE_JS;
-            tab.view.evaluateJavascript(js, null);
-            call.resolve();
+            String helper = readingHelperScript();
+            if (helper.isEmpty()) {
+                JSObject result = new JSObject();
+                result.put("applied", false);
+                call.resolve(result);
+                return;
+            }
+            String js = "(function(){try{" + helper + "\nif(!window.__4kReader){return false;}return window.__4kReader."
+                + (enabled ? "enable" : "disable") + "();}catch(e){return false;}})();";
+            tab.view.evaluateJavascript(js, value -> {
+                JSObject result = new JSObject();
+                result.put("applied", "true".equals(value));
+                call.resolve(result);
+            });
+        });
+    }
+
+    @PluginMethod
+    public void getReadingMode(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Tab tab = getActiveTab();
+            if (tab == null) {
+                JSObject result = new JSObject();
+                result.put("enabled", false);
+                call.resolve(result);
+                return;
+            }
+            tab.view.evaluateJavascript(
+                "(function(){try{return !!(window.__4kReader&&window.__4kReader.active());}catch(e){return false;}})();",
+                value -> {
+                    JSObject result = new JSObject();
+                    result.put("enabled", "true".equals(value));
+                    call.resolve(result);
+                }
+            );
         });
     }
 
@@ -1035,31 +1207,220 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     private JSONArray readDownloadRecords() {
-        try {
-            String raw = appData().getString("downloads", "[]");
-            return new JSONArray(raw == null ? "[]" : raw);
-        } catch (Exception error) {
-            return new JSONArray();
+        synchronized (downloadRecordLock) {
+            try {
+                String raw = appData().getString("downloads", "[]");
+                return new JSONArray(raw == null ? "[]" : raw);
+            } catch (Exception error) {
+                return new JSONArray();
+            }
         }
     }
 
     private void writeDownloadRecords(JSONArray records) {
-        while (records.length() > 100) {
-            records.remove(0);
+        synchronized (downloadRecordLock) {
+            while (records.length() > 100) {
+                records.remove(0);
+            }
+            appData().edit().putString("downloads", records.toString()).apply();
         }
-        appData().edit().putString("downloads", records.toString()).apply();
+    }
+
+    private void addDownloadRecord(JSONObject record) {
+        synchronized (downloadRecordLock) {
+            JSONArray records = readDownloadRecords();
+            records.put(record);
+            writeDownloadRecords(records);
+        }
+    }
+
+    private void markStaleDownloads() {
+        synchronized (downloadRecordLock) {
+            JSONArray records = readDownloadRecords();
+            boolean changed = false;
+            for (int i = 0; i < records.length(); i++) {
+                JSONObject record = records.optJSONObject(i);
+                if (record == null || !record.optBoolean("custom", false)) continue;
+                String status = record.optString("status", "");
+                if ("running".equals(status) || "pending".equals(status)) {
+                    try {
+                        record.put("status", "failed");
+                        changed = true;
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            if (changed) writeDownloadRecords(records);
+        }
+    }
+
+    private JSONObject findDownloadRecord(long id) {
+        JSONArray records = readDownloadRecords();
+        for (int i = records.length() - 1; i >= 0; i--) {
+            JSONObject record = records.optJSONObject(i);
+            if (record != null && record.optLong("id", -1) == id) return record;
+        }
+        return null;
+    }
+
+    private void updateCustomRecord(long id, String status, long bytes, long total) {
+        synchronized (downloadRecordLock) {
+            JSONArray records = readDownloadRecords();
+            for (int i = 0; i < records.length(); i++) {
+                JSONObject record = records.optJSONObject(i);
+                if (record == null || record.optLong("id", -1) != id) continue;
+                try {
+                    record.put("status", status);
+                    record.put("bytes", bytes);
+                    record.put("totalBytes", total);
+                } catch (Exception ignored) {
+                }
+            }
+            writeDownloadRecords(records);
+        }
+    }
+
+    private void registerCreateDocumentLauncher() {
+        try {
+            createDocumentLauncher = getActivity().registerForActivityResult(
+                new ActivityResultContracts.CreateDocument("*/*"),
+                uri -> {
+                    PendingDownload pending = pendingDownload;
+                    pendingDownload = null;
+                    if (uri == null || pending == null) return;
+                    try {
+                        getContext().getContentResolver().takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        );
+                    } catch (Exception ignored) {
+                    }
+                    startCustomDownload(uri, pending.filename, pending.url, pending.userAgent, pending.mime);
+                }
+            );
+        } catch (Exception ignored) {
+            createDocumentLauncher = null;
+        }
+    }
+
+    private void registerDownloadWatcher() {
+        downloadReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null) return;
+                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+                if (id < 0) return;
+                handleManagerDownloadComplete(id);
+            }
+        };
+        try {
+            IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+            if (Build.VERSION.SDK_INT >= 33) {
+                getContext().registerReceiver(downloadReceiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                getContext().registerReceiver(downloadReceiver, filter);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void handleManagerDownloadComplete(long id) {
+        JSONObject record = findDownloadRecord(id);
+        if (record == null) return;
+        String filename = record.optString("filename", "Download");
+        String mime = record.optString("mime", "");
+        boolean isPdf = isPdf(filename, mime);
+        if (autoOpenDownload || (autoOpenPdf && isPdf)) {
+            openManagerDownload(id);
+        }
+        if (downloadNotifications) toast("Downloaded " + filename);
+        JSObject data = new JSObject();
+        data.put("id", id);
+        data.put("filename", filename);
+        notifyListeners("downloadFinished", data);
+    }
+
+    private static boolean isPdf(String filename, String mime) {
+        String lowerName = filename == null ? "" : filename.toLowerCase();
+        String lowerMime = mime == null ? "" : mime.toLowerCase();
+        return lowerMime.contains("pdf") || lowerName.endsWith(".pdf");
+    }
+
+    private boolean startViewIntent(Uri uri, String mime) {
+        try {
+            if (uri == null) return false;
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                File file = new File(uri.getPath());
+                uri = FileProvider.getUriForFile(
+                    getContext(),
+                    getContext().getPackageName() + ".fileprovider",
+                    file
+                );
+            }
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mime == null || mime.isEmpty() ? "*/*" : mime);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getContext().startActivity(intent);
+            return true;
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
+    private boolean openManagerDownload(long id) {
+        DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) return false;
+        Cursor cursor = null;
+        try {
+            cursor = manager.query(new DownloadManager.Query().setFilterById(id));
+            if (cursor == null || !cursor.moveToFirst()) return false;
+            int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+            int mimeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE);
+            int status = statusIndex >= 0 ? cursor.getInt(statusIndex) : -1;
+            if (status != DownloadManager.STATUS_SUCCESSFUL) return false;
+            String localUri = uriIndex >= 0 ? cursor.getString(uriIndex) : null;
+            if (localUri == null || localUri.isEmpty()) return false;
+            String mime = mimeIndex >= 0 ? cursor.getString(mimeIndex) : null;
+            return startViewIntent(Uri.parse(localUri), mime);
+        } catch (Exception error) {
+            return false;
+        } finally {
+            if (cursor != null) cursor.close();
+        }
     }
 
     private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType) {
         try {
+            String filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType);
+            String mime = mimeType == null ? "" : mimeType;
+
+            if (askDownloadLocation && createDocumentLauncher != null && pendingDownload == null) {
+                pendingDownload = new PendingDownload(url, userAgent, filename, mime);
+                try {
+                    createDocumentLauncher.launch(filename);
+                    return;
+                } catch (Exception ignored) {
+                    pendingDownload = null;
+                }
+            }
+
+            if (!downloadLocation.isEmpty()) {
+                Uri target = createTreeDocument(Uri.parse(downloadLocation), filename, mime);
+                if (target != null) {
+                    startCustomDownload(target, filename, url, userAgent, mime);
+                    return;
+                }
+                toast("Could not save to the selected folder. Using app downloads.");
+            }
+
             DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
             if (manager == null) {
                 toast("Downloads are not available on this device.");
                 return;
             }
-            String filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType);
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setMimeType(mimeType);
+            if (!mime.isEmpty()) request.setMimeType(mime);
             if (userAgent != null && !userAgent.isEmpty()) {
                 request.addRequestHeader("User-Agent", userAgent);
             }
@@ -1077,15 +1438,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
             );
             long id = manager.enqueue(request);
 
-            JSONArray records = readDownloadRecords();
             JSONObject record = new JSONObject();
             record.put("id", id);
             record.put("filename", filename);
             record.put("url", url);
-            record.put("mime", mimeType == null ? "" : mimeType);
+            record.put("mime", mime);
             record.put("timestamp", System.currentTimeMillis());
-            records.put(record);
-            writeDownloadRecords(records);
+            addDownloadRecord(record);
 
             JSObject data = new JSObject();
             data.put("id", id);
@@ -1095,6 +1454,145 @@ public class EmbeddedWebViewPlugin extends Plugin {
         } catch (Exception error) {
             toast("Could not start download.");
         }
+    }
+
+    private Uri createTreeDocument(Uri treeUri, String filename, String mime) {
+        if (treeUri == null) return null;
+        try {
+            String docId = DocumentsContract.getTreeDocumentId(treeUri);
+            Uri parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+            String name = filename == null || filename.isEmpty() ? "download" : filename;
+            int dot = name.lastIndexOf('.');
+            String base = dot > 0 ? name.substring(0, dot) : name;
+            String ext = dot > 0 ? name.substring(dot) : "";
+            String resolvedMime = mime == null || mime.isEmpty() ? "application/octet-stream" : mime;
+            for (int attempt = 0; attempt < 20; attempt++) {
+                String candidate = attempt == 0 ? name : base + " (" + attempt + ")" + ext;
+                try {
+                    Uri created = DocumentsContract.createDocument(
+                        getContext().getContentResolver(), parent, resolvedMime, candidate
+                    );
+                    if (created != null) return created;
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private void startCustomDownload(Uri target, String filename, String url, String userAgent, String mime) {
+        final long id = System.currentTimeMillis() + (long) (Math.random() * 1000);
+        JSONObject record = new JSONObject();
+        try {
+            record.put("id", id);
+            record.put("filename", filename);
+            record.put("url", url);
+            record.put("mime", mime == null ? "" : mime);
+            record.put("timestamp", System.currentTimeMillis());
+            record.put("status", "pending");
+            record.put("bytes", 0);
+            record.put("totalBytes", 0);
+            record.put("custom", true);
+            record.put("uri", target.toString());
+            addDownloadRecord(record);
+        } catch (Exception ignored) {
+        }
+
+        JSObject data = new JSObject();
+        data.put("id", id);
+        data.put("filename", filename);
+        data.put("url", url);
+        notifyListeners("downloadStarted", data);
+
+        downloadExecutor.execute(() -> {
+            if (parallelDownloads) {
+                runCustomDownload(id, target, filename, url, userAgent, mime);
+            } else {
+                synchronized (serialDownloadLock) {
+                    runCustomDownload(id, target, filename, url, userAgent, mime);
+                }
+            }
+        });
+    }
+
+    private void runCustomDownload(long id, Uri target, String filename, String url, String userAgent, String mime) {
+        HttpURLConnection connection = null;
+        OutputStream output = null;
+        InputStream input = null;
+        long bytes = 0;
+        long total = -1;
+        try {
+            updateCustomRecord(id, "running", 0, 0);
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(30000);
+            connection.setInstanceFollowRedirects(true);
+            if (userAgent != null && !userAgent.isEmpty()) {
+                connection.setRequestProperty("User-Agent", userAgent);
+            }
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null && !cookie.isEmpty()) {
+                connection.setRequestProperty("Cookie", cookie);
+            }
+            connection.connect();
+            int code = connection.getResponseCode();
+            if (code < 200 || code >= 300) throw new IOException("HTTP " + code);
+            total = connection.getContentLength();
+            output = getContext().getContentResolver().openOutputStream(target, "w");
+            if (output == null) throw new IOException("Cannot open destination");
+            input = connection.getInputStream();
+            byte[] buffer = new byte[16384];
+            int read;
+            long lastUpdate = 0;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+                bytes += read;
+                long now = System.currentTimeMillis();
+                if (now - lastUpdate > 600) {
+                    lastUpdate = now;
+                    updateCustomRecord(id, "running", bytes, total);
+                    notifyDownloadProgress(id, bytes, total, "running");
+                }
+            }
+            output.flush();
+            updateCustomRecord(id, "successful", bytes, total);
+            notifyDownloadProgress(id, bytes, total, "successful");
+            if (downloadNotifications) toast("Downloaded " + filename);
+            boolean isPdf = isPdf(filename, mime);
+            if (autoOpenDownload || (autoOpenPdf && isPdf)) {
+                getActivity().runOnUiThread(() -> startViewIntent(target, mime));
+            }
+            JSObject data = new JSObject();
+            data.put("id", id);
+            data.put("filename", filename);
+            getActivity().runOnUiThread(() -> notifyListeners("downloadFinished", data));
+        } catch (Exception error) {
+            updateCustomRecord(id, "failed", bytes, total);
+            notifyDownloadProgress(id, bytes, total, "failed");
+            toast("Download failed: " + filename);
+        } finally {
+            try {
+                if (input != null) input.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (output != null) output.close();
+            } catch (Exception ignored) {
+            }
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void notifyDownloadProgress(long id, long bytes, long total, String status) {
+        getActivity().runOnUiThread(() -> {
+            JSObject data = new JSObject();
+            data.put("id", id);
+            data.put("bytes", bytes);
+            data.put("totalBytes", total);
+            data.put("status", status);
+            notifyListeners("downloadProgress", data);
+        });
     }
 
     private void toast(String message) {
@@ -1137,8 +1635,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 item.put("status", "unknown");
                 item.put("bytes", 0);
                 item.put("totalBytes", 0);
+                item.put("custom", record.optBoolean("custom", false));
 
-                if (manager != null) {
+                if (record.optBoolean("custom", false)) {
+                    item.put("status", record.optString("status", "unknown"));
+                    item.put("bytes", record.optLong("bytes", 0));
+                    item.put("totalBytes", record.optLong("totalBytes", 0));
+                    item.put("exists", record.optString("status", "").equals("successful"));
+                } else if (manager != null) {
                     Cursor cursor = null;
                     try {
                         cursor = manager.query(new DownloadManager.Query().setFilterById(id));
@@ -1161,7 +1665,73 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
         JSObject result = new JSObject();
         result.put("items", items);
+        try {
+            File dataPath = Environment.getDataDirectory();
+            StatFs stat = new StatFs(dataPath.getPath());
+            long total = stat.getTotalBytes();
+            long available = stat.getAvailableBytes();
+            result.put("usedBytes", total - available);
+            result.put("totalBytes", total);
+        } catch (Exception ignored) {
+            result.put("usedBytes", 0);
+            result.put("totalBytes", 0);
+        }
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void chooseDownloadFolder(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        );
+        getActivity().runOnUiThread(() -> {
+            try {
+                startActivityForResult(call, intent, "folderPicked");
+            } catch (Exception error) {
+                call.reject("Could not open the folder picker");
+            }
+        });
+    }
+
+    @ActivityCallback
+    private void folderPicked(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
+            call.reject("No folder selected");
+            return;
+        }
+        Uri uri = result.getData().getData();
+        try {
+            getContext().getContentResolver().takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            );
+        } catch (Exception ignored) {
+        }
+        downloadLocation = uri.toString();
+        persistSettings();
+        JSObject resultObject = new JSObject();
+        resultObject.put("uri", downloadLocation);
+        resultObject.put("label", folderLabel(uri));
+        call.resolve(resultObject);
+    }
+
+    private static String folderLabel(Uri uri) {
+        try {
+            String docId = DocumentsContract.getTreeDocumentId(uri);
+            int colon = docId.indexOf(':');
+            if (colon >= 0) {
+                String volume = docId.substring(0, colon);
+                String relative = docId.substring(colon + 1);
+                String root = "primary".equals(volume) ? "/storage/emulated/0" : "/storage/" + volume;
+                return root + (relative.isEmpty() ? "" : "/" + relative);
+            }
+        } catch (Exception ignored) {
+        }
+        return uri.toString();
     }
 
     @PluginMethod
@@ -1171,56 +1741,26 @@ public class EmbeddedWebViewPlugin extends Plugin {
             call.reject("A download id is required.");
             return;
         }
-        try {
-            DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-            if (manager == null) {
-                call.reject("Downloads are not available.");
+        JSONObject record = findDownloadRecord(id);
+        if (record != null && record.optBoolean("custom", false)) {
+            String uriValue = record.optString("uri", "");
+            String mime = record.optString("mime", "");
+            if (uriValue.isEmpty()) {
+                call.reject("The downloaded file could not be found.");
                 return;
             }
-            Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id));
-            if (cursor == null) {
-                call.reject("Unknown download.");
+            if (!startViewIntent(Uri.parse(uriValue), mime)) {
+                call.reject("No app can open this file.");
                 return;
             }
-            try {
-                if (!cursor.moveToFirst()) {
-                    call.reject("Unknown download.");
-                    return;
-                }
-                int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
-                int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
-                int mimeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE);
-                int status = statusIndex >= 0 ? cursor.getInt(statusIndex) : -1;
-                if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                    call.reject("This download is not finished yet.");
-                    return;
-                }
-                String localUri = uriIndex >= 0 ? cursor.getString(uriIndex) : null;
-                String mime = mimeIndex >= 0 ? cursor.getString(mimeIndex) : null;
-                if (localUri == null || localUri.isEmpty()) {
-                    call.reject("The downloaded file could not be found.");
-                    return;
-                }
-                Uri uri = Uri.parse(localUri);
-                if ("file".equalsIgnoreCase(uri.getScheme())) {
-                    File file = new File(uri.getPath());
-                    uri = FileProvider.getUriForFile(
-                        getContext(),
-                        getContext().getPackageName() + ".fileprovider",
-                        file
-                    );
-                }
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(uri, mime == null || mime.isEmpty() ? "*/*" : mime);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                getContext().startActivity(intent);
-                call.resolve();
-            } finally {
-                cursor.close();
-            }
-        } catch (Exception error) {
-            call.reject("Could not open the download: " + error.getMessage());
+            call.resolve();
+            return;
         }
+        if (!openManagerDownload(id)) {
+            call.reject("This download is not finished yet.");
+            return;
+        }
+        call.resolve();
     }
 
     @PluginMethod
@@ -1230,17 +1770,28 @@ public class EmbeddedWebViewPlugin extends Plugin {
             call.reject("A download id is required.");
             return;
         }
-        try {
-            DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-            if (manager != null) manager.remove(id);
-        } catch (Exception ignored) {
+        JSONObject record = findDownloadRecord(id);
+        if (record != null && record.optBoolean("custom", false)) {
+            String uriValue = record.optString("uri", "");
+            if (!uriValue.isEmpty()) {
+                try {
+                    getContext().getContentResolver().delete(Uri.parse(uriValue), null, null);
+                } catch (Exception ignored) {
+                }
+            }
+        } else {
+            try {
+                DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+                if (manager != null) manager.remove(id);
+            } catch (Exception ignored) {
+            }
         }
         JSONArray records = readDownloadRecords();
         JSONArray kept = new JSONArray();
         for (int i = 0; i < records.length(); i++) {
-            JSONObject record = records.optJSONObject(i);
-            if (record == null) continue;
-            if (record.optLong("id", -1) != id) kept.put(record);
+            JSONObject entry = records.optJSONObject(i);
+            if (entry == null) continue;
+            if (entry.optLong("id", -1) != id) kept.put(entry);
         }
         writeDownloadRecords(kept);
         call.resolve();
@@ -1260,6 +1811,17 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        if (downloadReceiver != null) {
+            try {
+                getContext().unregisterReceiver(downloadReceiver);
+            } catch (Exception ignored) {
+            }
+            downloadReceiver = null;
+        }
+        if (downloadExecutor != null) {
+            downloadExecutor.shutdownNow();
+            downloadExecutor = null;
+        }
         for (Integer id : new ArrayList<>(tabs.keySet())) {
             destroyTab(tabs.remove(id));
         }

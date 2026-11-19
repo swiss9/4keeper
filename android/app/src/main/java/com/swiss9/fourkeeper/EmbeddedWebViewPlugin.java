@@ -65,6 +65,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +82,23 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
+
+    private static final String MEDIA_SCAN_JS =
+        "(function(){var out=[];var seen={};"
+            + "function kind(u){if(!u)return '';if(/\\.m3u8?(\\?|#|$)/i.test(u))return 'hls';"
+            + "if(/\\.mpd(\\?|#|$)/i.test(u))return 'dash';"
+            + "if(/\\.(mp4|webm|m4v|mkv|mov)(\\?|#|$)/i.test(u))return 'video';"
+            + "if(/\\.(mp3|m4a|aac|ogg)(\\?|#|$)/i.test(u))return 'audio';return '';}"
+            + "function add(u,k){if(!u)return;try{u=new URL(u,location.href).href}catch(e){return}"
+            + "if(!/^https?:/i.test(u))return;if(seen[u])return;seen[u]=1;out.push({url:u,kind:k});}"
+            + "var n=document.querySelectorAll('video,audio,source');"
+            + "for(var i=0;i<n.length;i++){var el=n[i];var s=el.currentSrc||el.src||el.getAttribute('src');"
+            + "var k=kind(s||'');if(k)add(s,k);"
+            + "var c=el.querySelectorAll?el.querySelectorAll('source'):[];"
+            + "for(var j=0;j<c.length;j++){var cs=c[j].src||c[j].getAttribute('src');var ck=kind(cs||'');if(ck)add(cs,ck);}}"
+            + "var a=document.querySelectorAll('a[href]');"
+            + "for(var l=0;l<a.length&&out.length<8;l++){var h=a[l].href;var hk=kind(h||'');if(hk)add(h,hk);}"
+            + "return out.slice(0,8);})()";
 
     private static final String[] TRACKER_HOSTS = new String[] {
         "doubleclick.net",
@@ -161,18 +179,22 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private ActivityResultLauncher<String> createDocumentLauncher;
     private PendingDownload pendingDownload;
     private BroadcastReceiver downloadReceiver;
+    private static final int MAX_MEDIA_ITEMS = 8;
+    private final Map<Integer, LinkedHashMap<String, String>> tabMedia = new HashMap<>();
 
     private static class PendingDownload {
         final String url;
         final String userAgent;
         final String filename;
         final String mime;
+        final int tabId;
 
-        PendingDownload(String url, String userAgent, String filename, String mime) {
+        PendingDownload(String url, String userAgent, String filename, String mime, int tabId) {
             this.url = url;
             this.userAgent = userAgent;
             this.filename = filename;
             this.mime = mime;
+            this.tabId = tabId;
         }
     }
 
@@ -369,7 +391,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         view.setWebViewClient(new TabClient(id));
         view.setWebChromeClient(new TabChromeClient(id));
         view.setDownloadListener((downloadUrl, userAgent, contentDisposition, mimeType, contentLength) ->
-            enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType)
+            enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType, id)
         );
         view.setVisibility(View.INVISIBLE);
 
@@ -393,6 +415,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private void destroyTab(Tab tab) {
         if (tab == null) return;
+        forgetTabMedia(tab.id);
         ViewGroup parent = (ViewGroup) tab.view.getParent();
         if (parent != null) {
             parent.removeView(tab.view);
@@ -497,6 +520,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            clearTabMedia(tabId, "navigation");
             Tab tab = tabs.get(tabId);
             if (tab != null && url != null && !"about:blank".equals(url) && !url.startsWith("data:")) {
                 tab.url = url;
@@ -516,6 +540,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 tab.title = view.getTitle() == null ? tab.title : view.getTitle();
             }
             view.evaluateJavascript(TAP_STYLE_JS, null);
+            view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
             JSObject data = tabState(tab);
             data.put("tabId", tabId);
             data.put("activeTabId", activeTabId);
@@ -546,6 +571,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            detectMediaRequest(tabId, request);
             if (trackingProtectionEnabled && !request.isForMainFrame()) {
                 String host = request.getUrl().getHost();
                 if (isTracker(host)) {
@@ -604,6 +630,107 @@ public class EmbeddedWebViewPlugin extends Plugin {
             data.put("url", view.getUrl() == null ? "" : view.getUrl());
             notifyListeners("faviconChanged", data);
         }
+    }
+
+    private static String mediaKind(String url) {
+        if (url == null || url.isEmpty()) return null;
+        String lower = url.toLowerCase();
+        int cut = lower.indexOf('#');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        cut = lower.indexOf('?');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        if (lower.endsWith(".m3u8") || lower.endsWith(".m3u")) return "hls";
+        if (lower.endsWith(".mpd")) return "dash";
+        if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".m4v")
+            || lower.endsWith(".mkv") || lower.endsWith(".mov")) return "video";
+        if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac")
+            || lower.endsWith(".ogg")) return "audio";
+        return null;
+    }
+
+    private void detectMediaRequest(int tabId, WebResourceRequest request) {
+        try {
+            if (request == null || request.getUrl() == null || request.isForMainFrame()) return;
+            final String url = request.getUrl().toString();
+            final String kind = mediaKind(url);
+            if (kind == null) return;
+            final int mediaTabId = tabId;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            activity.runOnUiThread(() -> recordTabMedia(mediaTabId, url, kind, "network"));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void recordTabMedia(int tabId, String url, String kind, String source) {
+        if (tabId < 0 || url == null || url.isEmpty()) return;
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
+        String resolved = kind == null || kind.isEmpty() ? mediaKind(url) : kind;
+        if (resolved == null) return;
+        boolean added = false;
+        synchronized (tabMedia) {
+            LinkedHashMap<String, String> items = tabMedia.get(tabId);
+            if (items == null) {
+                items = new LinkedHashMap<>();
+                tabMedia.put(tabId, items);
+            }
+            if (!items.containsKey(url)) {
+                items.put(url, resolved);
+                while (items.size() > MAX_MEDIA_ITEMS) {
+                    String oldest = items.keySet().iterator().next();
+                    items.remove(oldest);
+                }
+                added = true;
+            }
+        }
+        if (!added) return;
+        JSObject data = new JSObject();
+        data.put("tabId", tabId);
+        data.put("activeTabId", activeTabId);
+        data.put("url", url);
+        data.put("kind", resolved);
+        data.put("source", source == null ? "" : source);
+        data.put("title", mediaTitleForTab(tabId));
+        notifyListeners("mediaDetected", data);
+    }
+
+    private void handleScannedMedia(int tabId, String value) {
+        if (value == null || value.isEmpty() || "null".equals(value)) return;
+        try {
+            JSONArray found = new JSONArray(value);
+            for (int i = 0; i < found.length(); i++) {
+                JSONObject item = found.optJSONObject(i);
+                if (item == null) continue;
+                recordTabMedia(tabId, item.optString("url", ""), item.optString("kind", ""), "page");
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void clearTabMedia(int tabId, String reason) {
+        boolean had;
+        synchronized (tabMedia) {
+            had = tabMedia.remove(tabId) != null;
+        }
+        if (!had) return;
+        JSObject data = new JSObject();
+        data.put("tabId", tabId);
+        data.put("activeTabId", activeTabId);
+        data.put("reason", reason == null ? "" : reason);
+        notifyListeners("mediaCleared", data);
+    }
+
+    private void forgetTabMedia(int tabId) {
+        synchronized (tabMedia) {
+            tabMedia.remove(tabId);
+        }
+    }
+
+    private String mediaTitleForTab(int tabId) {
+        Tab tab = tabs.get(tabId);
+        return tab == null || tab.title == null ? "" : tab.title;
     }
 
     private static String escapeHtml(String text) {
@@ -742,6 +869,27 @@ public class EmbeddedWebViewPlugin extends Plugin {
             result.put("active", tabState(getActiveTab()));
             call.resolve(result);
         });
+    }
+
+    @PluginMethod
+    public void getTabMedia(PluginCall call) {
+        JSArray items = new JSArray();
+        synchronized (tabMedia) {
+            for (Map.Entry<Integer, LinkedHashMap<String, String>> entry : tabMedia.entrySet()) {
+                for (Map.Entry<String, String> media : entry.getValue().entrySet()) {
+                    JSObject item = new JSObject();
+                    item.put("tabId", entry.getKey());
+                    item.put("url", media.getKey());
+                    item.put("kind", media.getValue());
+                    item.put("title", mediaTitleForTab(entry.getKey()));
+                    items.put(item);
+                }
+            }
+        }
+        JSObject result = new JSObject();
+        result.put("items", items);
+        result.put("activeTabId", activeTabId);
+        call.resolve(result);
     }
 
     @PluginMethod
@@ -1295,7 +1443,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                         );
                     } catch (Exception ignored) {
                     }
-                    startCustomDownload(uri, pending.filename, pending.url, pending.userAgent, pending.mime);
+                    startCustomDownload(uri, pending.filename, pending.url, pending.userAgent, pending.mime, pending.tabId);
                 }
             );
         } catch (Exception ignored) {
@@ -1337,6 +1485,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         JSObject data = new JSObject();
         data.put("id", id);
         data.put("filename", filename);
+        data.put("tabId", record.optInt("tabId", -1));
         notifyListeners("downloadFinished", data);
     }
 
@@ -1390,13 +1539,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
-    private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType) {
+    private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType, int sourceTabId) {
         try {
             String filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType);
             String mime = mimeType == null ? "" : mimeType;
 
             if (askDownloadLocation && createDocumentLauncher != null && pendingDownload == null) {
-                pendingDownload = new PendingDownload(url, userAgent, filename, mime);
+                pendingDownload = new PendingDownload(url, userAgent, filename, mime, sourceTabId);
                 try {
                     createDocumentLauncher.launch(filename);
                     return;
@@ -1408,7 +1557,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (!downloadLocation.isEmpty()) {
                 Uri target = createTreeDocument(Uri.parse(downloadLocation), filename, mime);
                 if (target != null) {
-                    startCustomDownload(target, filename, url, userAgent, mime);
+                    startCustomDownload(target, filename, url, userAgent, mime, sourceTabId);
                     return;
                 }
                 toast("Could not save to the selected folder. Using app downloads.");
@@ -1444,12 +1593,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
             record.put("url", url);
             record.put("mime", mime);
             record.put("timestamp", System.currentTimeMillis());
+            record.put("tabId", sourceTabId);
             addDownloadRecord(record);
 
             JSObject data = new JSObject();
             data.put("id", id);
             data.put("filename", filename);
             data.put("url", url);
+            data.put("tabId", sourceTabId);
             notifyListeners("downloadStarted", data);
         } catch (Exception error) {
             toast("Could not start download.");
@@ -1481,7 +1632,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return null;
     }
 
-    private void startCustomDownload(Uri target, String filename, String url, String userAgent, String mime) {
+    private void startCustomDownload(Uri target, String filename, String url, String userAgent, String mime, int sourceTabId) {
         final long id = System.currentTimeMillis() + (long) (Math.random() * 1000);
         JSONObject record = new JSONObject();
         try {
@@ -1495,6 +1646,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             record.put("totalBytes", 0);
             record.put("custom", true);
             record.put("uri", target.toString());
+            record.put("tabId", sourceTabId);
             addDownloadRecord(record);
         } catch (Exception ignored) {
         }
@@ -1503,20 +1655,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
         data.put("id", id);
         data.put("filename", filename);
         data.put("url", url);
+        data.put("tabId", sourceTabId);
         notifyListeners("downloadStarted", data);
 
         downloadExecutor.execute(() -> {
             if (parallelDownloads) {
-                runCustomDownload(id, target, filename, url, userAgent, mime);
+                runCustomDownload(id, target, filename, url, userAgent, mime, sourceTabId);
             } else {
                 synchronized (serialDownloadLock) {
-                    runCustomDownload(id, target, filename, url, userAgent, mime);
+                    runCustomDownload(id, target, filename, url, userAgent, mime, sourceTabId);
                 }
             }
         });
     }
 
-    private void runCustomDownload(long id, Uri target, String filename, String url, String userAgent, String mime) {
+    private void runCustomDownload(long id, Uri target, String filename, String url, String userAgent, String mime, int sourceTabId) {
         HttpURLConnection connection = null;
         OutputStream output = null;
         InputStream input = null;
@@ -1566,6 +1719,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             JSObject data = new JSObject();
             data.put("id", id);
             data.put("filename", filename);
+            data.put("tabId", sourceTabId);
             getActivity().runOnUiThread(() -> notifyListeners("downloadFinished", data));
         } catch (Exception error) {
             updateCustomRecord(id, "failed", bytes, total);
@@ -1632,6 +1786,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 item.put("url", record.optString("url", ""));
                 item.put("mime", record.optString("mime", ""));
                 item.put("timestamp", record.optLong("timestamp", 0));
+                item.put("tabId", record.optInt("tabId", -1));
                 item.put("status", "unknown");
                 item.put("bytes", 0);
                 item.put("totalBytes", 0);

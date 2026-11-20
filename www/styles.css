@@ -2630,9 +2630,13 @@ html.page-behind .browser {
 }
 
 .tab-card.tab-row.is-active {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+[data-theme="light"] .tab-card.tab-row.is-active {
+  background: rgba(17, 17, 20, 0.08);
 }
 
 .tab-row .tab-favicon {
@@ -2733,6 +2737,99 @@ html.page-behind .browser {
 .tab-row-action .icon {
   width: 17px;
   height: 17px;
+}
+
+.tab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tab-title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tab-title-line .tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tab-group-btn {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+.tab-group-btn:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab-group-btn.is-grouped {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tab-group-btn .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.sheet-footer {
+  flex: 0 0 auto;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.tab-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.tab-tool {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+.tab-tool:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab-tool:disabled {
+  opacity: 0.4;
+}
+
+.tab-tool-danger {
+  color: var(--danger);
+}
+
+.tab-tool .icon-dot {
+  top: 6px;
+  right: 14px;
 }
 
 /* Pinned rows keep the same density as regular rows. */

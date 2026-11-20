@@ -202,16 +202,11 @@ const dom = {
   menuBtn: $('menuBtn'),
   tabSheet: $('tabSheet'),
   tabSheetBackdrop: $('tabSheetBackdrop'),
-  tabSheetCount: $('tabSheetCount'),
+  tabSheetTitle: $('tabSheetTitle'),
   tabsList: $('tabsList'),
   tabsEmpty: $('tabsEmpty'),
   tabsEmptyNewTabBtn: $('tabsEmptyNewTabBtn'),
   newTabBtn: $('newTabBtn'),
-  tabSelectBtn: $('tabSelectBtn'),
-  tabSelectBar: $('tabSelectBar'),
-  tabSelectCount: $('tabSelectCount'),
-  tabSelectCancel: $('tabSelectCancel'),
-  tabGroupBtn: $('tabGroupBtn'),
   closeAllTabsBtn: $('closeAllTabsBtn'),
   closeTabSheetBtn: $('closeTabSheetBtn'),
   menuSheet: $('menuSheet'),
@@ -830,7 +825,7 @@ function updateTabBadge() {
   const count = tabs.length;
   dom.tabsBadge.textContent = String(count);
   dom.tabsBadge.classList.toggle('hidden', count === 0);
-  dom.tabSheetCount.textContent = String(count);
+  if (dom.tabSheetTitle) dom.tabSheetTitle.textContent = 'Tabs (' + count + ')';
   if (dom.closeAllTabsBtn) dom.closeAllTabsBtn.disabled = count === 0;
 }
 
@@ -1002,10 +997,10 @@ function closeScreen(name, screen) {
 }
 
 function closeOtherSheets(keep) {
-  if (keep !== 'tabs') closeTabSheet();
+  if (keep !== 'tabs' && keep !== 'choiceTabs') closeTabSheet();
   if (keep !== 'menu') closeMenu();
   if (keep !== 'siteInfo') closeSiteInfo();
-  if (keep !== 'choice') closeChoice();
+  if (keep !== 'choice' && keep !== 'choiceTabs') closeChoice();
 }
 
 function attachSheetDrag(sheet, closeFn) {
@@ -1203,7 +1198,7 @@ function closeSiteInfo() {
 
 /* -------------------------------------------------------------- Choices */
 
-function openChoice(title, options, current, onSelect) {
+function openChoice(title, options, current, onSelect, opts) {
   overlays.add('choice');
   hideSuggestions();
   dom.choiceTitle.textContent = title;
@@ -1229,7 +1224,7 @@ function openChoice(title, options, current, onSelect) {
   dom.choiceSheet.classList.add('open');
   dom.choiceSheet.setAttribute('aria-hidden', 'false');
   dom.choiceBackdrop.classList.add('open');
-  closeOtherSheets('choice');
+  closeOtherSheets(opts && opts.keepTabs ? 'choiceTabs' : 'choice');
   syncNativeVisibility();
 }
 
@@ -1659,7 +1654,6 @@ function tabCardMarkup(tab) {
   const isActive = tab.id === activeTabId;
   const meta = getTabMeta(tab.id);
   const isPinned = meta.pinned === true;
-  const isSelected = tabSelectionMode && tabSelection.has(tab.id);
   const group = meta.groupId ? getTabGroup(meta.groupId) : null;
 
   const title = tab.title || 'New tab';
@@ -1668,11 +1662,7 @@ function tabCardMarkup(tab) {
   const favicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
   const icon = favicon || `<span class="favicon">${escapeHtml(monogram)}</span>`;
 
-  const checkButton = tabSelectionMode
-    ? `<button class="tab-check" type="button" data-tab-check="${tab.id}" aria-label="${isSelected ? 'Deselect tab' : 'Select tab'}"><svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></button>`
-    : '';
-
-  const classes = 'tab-card tab-row' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '') + (isSelected ? ' is-selected' : '') + (tabSelectionMode ? ' is-selecting' : '');
+  const classes = 'tab-card tab-row' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '');
   const badges = tabDownloadBadgesMarkup(tab.id);
   const mediaHint = mediaHintForTab(tab.id);
   const groupHint = group ? ' · ' + group.name : '';
@@ -1680,16 +1670,17 @@ function tabCardMarkup(tab) {
 
   return `
     <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title + mediaHint)}" aria-pressed="${isActive}">
-      ${checkButton}
       <span class="tab-favicon">${icon}</span>
       <div class="tab-meta">
-        <div class="tab-title">${escapeHtml(title)}</div>
+        <div class="tab-title-line">
+          <div class="tab-title">${escapeHtml(title)}</div>
+          <button class="tab-group-btn${group ? ' is-grouped' : ''}" type="button" data-tab-group="${tab.id}" aria-label="${escapeHtml(groupLabel + ': ' + title)}" title="${escapeHtml(group ? group.name : 'Add to group')}">
+            ${svgIcon(group ? 'layers' : 'folder', 'icon icon-xs')}
+          </button>
+        </div>
         <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}${escapeHtml(groupHint)}</div>
       </div>
       ${badges}
-      <button class="tab-row-action${group ? ' is-grouped' : ''}" type="button" data-tab-group="${tab.id}" aria-label="${escapeHtml(groupLabel + ': ' + title)}" title="${escapeHtml(group ? group.name : 'Add to group')}">
-        ${svgIcon(group ? 'layers' : 'folder', 'icon icon-sm')}
-      </button>
       <button class="tab-row-action tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
         ${svgIcon('close', 'icon icon-sm')}
       </button>
@@ -1821,7 +1812,7 @@ function assignTabToGroup(tabId) {
     if (value === '__new') createGroupForTab(tabId);
     else if (value === '__remove') removeTabFromGroup(tabId);
     else assignTabToGroupId(tabId, value);
-  });
+  }, { keepTabs: true });
 }
 
 function validTabGroups() {
@@ -1858,78 +1849,19 @@ function renderTabs() {
   updateDownloadsIndicator();
   const hasTabs = tabs.length > 0;
   dom.tabsEmpty.classList.toggle('hidden', hasTabs);
-  dom.tabSelectBar.classList.toggle('hidden', !tabSelectionMode);
-  dom.tabSelectCount.textContent = tabSelection.size + ' selected';
-  dom.tabGroupBtn.disabled = tabSelection.size < 2;
-  dom.tabSelectBtn.setAttribute('aria-pressed', String(tabSelectionMode));
 
-  const metaById = {};
-  tabs.forEach((tab) => { metaById[tab.id] = getTabMeta(tab.id); });
-
-  if (tabGroupFilter) {
-    const group = getTabGroup(tabGroupFilter);
-    if (!group) {
-      tabGroupFilter = null;
-      renderTabs();
-      return;
-    }
-    const groupTabs = tabs.filter((tab) => getTabMeta(tab.id).groupId === tabGroupFilter);
-    let html = '<div class="tab-group-view">';
-    html += `
-      <button class="icon-btn icon-btn-sm" type="button" data-group-back="true" aria-label="Back to all tabs">
-        ${svgIcon('chevron', 'icon')}
-      </button>
-      <span class="tab-section-label">${escapeHtml(group.name)}</span>
-      <button class="icon-btn icon-btn-sm" type="button" data-group-ungroup="${group.id}" aria-label="Ungroup tabs">
-        ${svgIcon('layers', 'icon')}
-      </button>
-    </div>`;
-    if (groupTabs.length) {
-      html += '<div class="tab-grid is-pinned">' + groupTabs.map(tabCardMarkup).join('') + '</div>';
-    } else {
-      html += '<div class="empty">No tabs in this group</div>';
-    }
-    dom.tabsList.innerHTML = html;
+  if (!hasTabs) {
+    dom.tabsList.innerHTML = '';
     return;
   }
 
-  const groups = validTabGroups();
-  const pinned = tabs.filter((tab) => metaById[tab.id].pinned === true);
-  const grouped = new Set();
-  groups.forEach((group) => group.tabIds.forEach((id) => grouped.add(id)));
-  const ungrouped = tabs.filter((tab) => !metaById[tab.id].pinned && !grouped.has(tab.id));
-
-  let html = '';
   try {
-    /* Groups sit in a simple vertical list at the top of the sheet; with no
-     * groups the whole section stays out of the way. */
-    if (groups.length) {
-      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('layers', 'icon') + '</span><span class="tab-section-label">Groups</span><span class="tab-section-count">' + groups.length + '</span></div>';
-      html += '<div class="tab-group-list" aria-label="Tab groups">' + groups.map(groupCardMarkup).join('') + '</div>';
-    }
-    if (pinned.length) {
-      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('pin', 'icon') + '</span><span class="tab-section-label">Pinned</span></div>';
-      html += '<div class="tab-grid is-pinned">' + pinned.map(tabCardMarkup).join('') + '</div>';
-    }
-    if (ungrouped.length) {
-      html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span><span class="tab-section-count">' + ungrouped.length + '</span></div>';
-      html += '<div class="tab-grid">' + ungrouped.map(tabCardMarkup).join('') + '</div>';
-    }
+    dom.tabsList.innerHTML = '<div class="tab-grid">' + tabs.map(tabCardMarkup).join('') + '</div>';
   } catch (error) {
     /* One malformed card must never blank the whole tab manager. */
-    console.warn('[4keeper] Tab render fell back to a flat list:', error);
-    html = '';
-    try {
-      if (tabs.length) {
-        html += '<div class="tab-section-head"><span class="icon">' + svgIcon('newtab', 'icon') + '</span><span class="tab-section-label">Tabs</span></div>';
-        html += '<div class="tab-grid">' + tabs.map(tabCardMarkup).join('') + '</div>';
-      }
-    } catch (inner) {
-      html = '';
-    }
+    console.warn('[4keeper] Tab render failed:', error);
+    dom.tabsList.innerHTML = '';
   }
-  dom.tabsList.innerHTML = html;
-  dom.tabsEmpty.classList.toggle('hidden', hasTabs);
 }
 
 async function createTabWithUrl(url, activate) {
@@ -3564,9 +3496,6 @@ function attachUiListeners() {
     closeTabSheet();
     openDownloads();
   });
-  dom.tabSelectBtn.addEventListener('click', toggleTabSelection);
-  dom.tabSelectCancel.addEventListener('click', toggleTabSelection);
-  dom.tabGroupBtn.addEventListener('click', groupSelectedTabs);
   dom.closeAllTabsBtn.addEventListener('click', () => {
     if (!tabs.length) return;
     openDialog({
@@ -3660,6 +3589,7 @@ function attachUiListeners() {
   });
   dom.tabsList.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target.closest('[data-tab-group]') || event.target.closest('[data-close-tab]')) return;
     const card = event.target.closest('[data-tab-id]');
     if (!card) return;
     event.preventDefault();

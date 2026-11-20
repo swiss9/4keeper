@@ -2226,279 +2226,6 @@ html.page-behind .browser {
   color: var(--muted);
 }
 
-/* ------------------------------------------------ Tab sections / groups */
-
-.tab-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 2px 2px 12px;
-}
-
-.tab-section-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px 8px;
-}
-
-.tab-section-head .icon {
-  width: 14px;
-  height: 14px;
-  color: var(--muted);
-}
-
-.tab-section-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.tab-section-head .btn-sm {
-  min-height: 30px;
-  padding: 0 11px;
-  font-size: 12px;
-}
-
-.tab-section-count {
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-/* Groups sit in a horizontally scrollable carousel at the top of the sheet. */
-.tab-group-carousel {
-  display: flex;
-  gap: 10px;
-  margin: 0 -4px;
-  padding: 2px 4px 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.tab-group-carousel::-webkit-scrollbar {
-  display: none;
-}
-
-.tab-group-carousel > .group-preview {
-  flex: 0 0 auto;
-  width: min(74vw, 268px);
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  height: auto;
-  min-height: 74px;
-  padding: 10px;
-}
-
-.tab-group-carousel .group-preview .tab-meta {
-  flex: 1 1 auto;
-  padding: 0;
-  gap: 4px;
-}
-
-.tab-group-carousel .group-preview .tab-meta-title {
-  gap: 6px;
-}
-
-.tab-group-carousel .group-preview .tab-host {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.tab-group-carousel .group-preview .icon-btn-sm {
-  flex: 0 0 auto;
-}
-
-.tab-grid.is-pinned .tab-preview {
-  height: 62px;
-  border-bottom-color: transparent;
-}
-
-.tab-grid.is-pinned .tab-monogram {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  font-size: 13px;
-}
-
-.tab-grid.is-pinned .tab-meta {
-  padding: 6px 10px 9px;
-}
-
-.tab-grid.is-pinned .tab-title {
-  font-size: 12px;
-}
-
-.tab-grid.is-pinned .tab-host {
-  display: none;
-}
-
-.tab-pin {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(9, 9, 11, 0.55);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  transition: background-color 0.13s ease, color 0.13s ease;
-}
-
-[data-theme="light"] .tab-pin {
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.tab-pin .icon {
-  width: 13px;
-  height: 13px;
-}
-
-.tab-pin.is-pinned {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-
-.tab-check {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
-  background: var(--bg);
-  color: transparent;
-}
-
-.tab-check .icon {
-  width: 13px;
-  height: 13px;
-}
-
-.tab-card.is-selecting {
-  cursor: pointer;
-}
-
-.tab-card.is-selected {
-  border-color: var(--border-strong);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-.tab-card.is-selected .tab-check {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-
-.group-preview {
-  height: 96px;
-}
-
-.tab-group-carousel .group-preview {
-  height: auto;
-}
-
-.group-icon {
-  display: grid;
-  place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  background: var(--surface-3);
-  border: 1px solid var(--border-strong);
-  color: var(--text-2);
-}
-
-.group-icon .icon {
-  width: 21px;
-  height: 21px;
-}
-
-.group-mini-monogram {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin: 0 2px;
-  border-radius: 5px;
-  font-size: 8px;
-  font-weight: 700;
-  color: var(--text-2);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.group-mini-monogram img {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-.tab-group-view {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 2px 10px;
-}
-
-.tab-group-view .tab-section-label {
-  color: var(--text);
-}
-
-.tab-group-view .icon-btn-sm {
-  color: var(--text-2);
-}
-
-.tab-select-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px -2px -2px;
-  padding: 10px 4px calc(10px + var(--safe-bottom));
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
-}
-
-.tab-select-count {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-
 .btn-sm {
   min-height: 36px;
   padding: 0 14px;
@@ -2622,9 +2349,9 @@ html.page-behind .browser {
 .tab-card.tab-row {
   flex-direction: row;
   align-items: center;
-  gap: 11px;
-  min-height: 58px;
-  padding: 8px 8px 8px 12px;
+  gap: 10px;
+  min-height: 60px;
+  padding: 8px 6px 8px 12px;
   border-radius: 14px;
   overflow: visible;
 }
@@ -2686,36 +2413,14 @@ html.page-behind .browser {
   flex: 0 0 auto;
 }
 
-.tab-card.tab-row .tab-check {
-  position: static;
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-}
-
-.tab-card.tab-row .tab-close {
-  position: static;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-}
-
-.tab-card.tab-row .tab-close:active {
-  background: var(--surface-3);
-  color: var(--text);
-}
-
-/* Row actions: add-to-group folder and close. */
-.tab-row-action {
+/* Row actions: pin and close, sized for comfortable tapping. */
+.tab-row-action,
+.tab-pin-btn {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -2724,17 +2429,20 @@ html.page-behind .browser {
   transition: background-color 0.13s ease, color 0.13s ease;
 }
 
-.tab-row-action:active {
+.tab-card.tab-row .tab-close {
+  position: static;
+  width: 44px;
+  height: 44px;
+}
+
+.tab-row-action:active,
+.tab-pin-btn:active {
   background: var(--surface-3);
   color: var(--text);
 }
 
-.tab-row-action.is-grouped {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.tab-row-action .icon {
+.tab-row-action .icon,
+.tab-pin-btn .icon {
   width: 17px;
   height: 17px;
 }
@@ -2743,45 +2451,6 @@ html.page-behind .browser {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.tab-title-line {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.tab-title-line .tab-title {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tab-group-btn {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  transition: background-color 0.13s ease, color 0.13s ease;
-}
-
-.tab-group-btn:active {
-  background: var(--surface-3);
-  color: var(--text);
-}
-
-.tab-group-btn.is-grouped {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.tab-group-btn .icon {
-  width: 14px;
-  height: 14px;
 }
 
 .sheet-footer {
@@ -2833,57 +2502,8 @@ html.page-behind .browser {
 }
 
 /* Pinned rows keep the same density as regular rows. */
-.tab-grid.is-pinned .tab-row .tab-title {
-  font-size: 13.5px;
-}
-
-.tab-grid.is-pinned .tab-row .tab-host {
-  display: block;
-}
-
-/* Groups: plain vertical rows above the tab list, no carousel. */
-.tab-group-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 2px 6px;
-}
-
-.tab-card.group-row {
-  flex-direction: row;
-  align-items: center;
-  gap: 11px;
-  min-height: 56px;
-  padding: 8px 8px 8px 12px;
-  border-radius: 14px;
-  overflow: visible;
-}
-
-.tab-card.group-row.is-active {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.group-row .group-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-}
-
-.group-row .group-icon .icon {
-  width: 17px;
-  height: 17px;
-}
-
-.group-row .tab-meta {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0;
-  gap: 2px;
-}
-
-.group-row .tab-title {
-  font-size: 13.5px;
-  font-weight: 600;
+.tab-card.tab-row.is-pinned .tab-pin-btn {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--border);
 }

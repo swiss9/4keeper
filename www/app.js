@@ -119,7 +119,6 @@ const ICONS = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   pin: '<path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6Z"/><path d="M12 14v7"/>',
-  layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
   upload: '<path d="M12 21V9m-5 5 5-5 5 5"/><path d="M5 3h14"/>'
 };
 
@@ -164,12 +163,7 @@ let bootPromise = null;
 let readingModeOn = false;
 let bookmarkFolders = [];
 let tabMeta = {};
-let tabGroups = [];
-let tabSelectionMode = false;
-const tabSelection = new Set();
-let tabGroupFilter = null;
 let tabLongPress = null;
-let suppressTabClick = false;
 
 const overlays = new Set();
 
@@ -502,7 +496,11 @@ function normalizeSession(raw) {
   }
   const restored = raw.tabs
     .filter((tab) => tab && typeof tab.url === 'string' && isHttpUrl(tab.url))
-    .map((tab) => ({ url: String(tab.url), title: typeof tab.title === 'string' ? tab.title : '' }))
+    .map((tab) => ({
+      url: String(tab.url),
+      title: typeof tab.title === 'string' ? tab.title : '',
+      pinned: tab.pinned === true
+    }))
     .slice(0, 8);
   if (!restored.length && raw.tabs.length) {
     wipeStoredSession('no usable tab entries');
@@ -570,12 +568,10 @@ const Store = {
     session = readStoredSession(native);
     bookmarkFolders = read('folders', []);
     tabMeta = read('tabMeta', {});
-    tabGroups = read('tabGroups', []);
 
     if (!Array.isArray(history)) history = [];
     if (!Array.isArray(bookmarks)) bookmarks = [];
     if (!Array.isArray(bookmarkFolders)) bookmarkFolders = [];
-    if (!Array.isArray(tabGroups)) tabGroups = [];
     if (!tabMeta || typeof tabMeta !== 'object' || Array.isArray(tabMeta)) tabMeta = {};
     if (!favicons || typeof favicons !== 'object' || Array.isArray(favicons)) favicons = {};
     if (!session || !Array.isArray(session.tabs)) session = { tabs: [], activeIndex: 0 };
@@ -583,17 +579,7 @@ const Store = {
     bookmarkFolders = bookmarkFolders
       .filter((folder) => folder && folder.id && folder.name)
       .map((folder) => ({ id: String(folder.id), name: String(folder.name), createdAt: Number(folder.createdAt) || Date.now() }));
-    tabGroups = tabGroups
-      .filter((group) => group && group.id && group.name)
-      .map((group) => ({
-        id: String(group.id),
-        name: String(group.name),
-        createdAt: Number(group.createdAt) || Date.now(),
-        tabIds: Array.isArray(group.tabIds)
-          ? group.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
-          : []
-      }))
-      .filter((group) => group.tabIds.length > 0);
+    tabMeta = normalizeTabMeta(tabMeta);
 
     migrateLegacy(native);
 
@@ -604,7 +590,6 @@ const Store = {
     this.save('session');
     this.save('folders');
     this.save('tabMeta');
-    this.save('tabGroups');
   },
 
   save(key) {
@@ -616,7 +601,6 @@ const Store = {
     else if (key === 'session') value = session;
     else if (key === 'folders') value = bookmarkFolders;
     else if (key === 'tabMeta') value = tabMeta;
-    else if (key === 'tabGroups') value = tabGroups;
     else return;
 
     let json;
@@ -1480,7 +1464,7 @@ function saveSession() {
   tabs.forEach((tab) => {
     if (!isHttpUrl(tab.url)) return;
     if (tab.id === activeTabId) activeIndex = saved.length;
-    saved.push({ url: tab.url, title: tab.title || '' });
+    saved.push({ url: tab.url, title: tab.title || '', pinned: getTabMeta(tab.id).pinned === true });
   });
   session = { tabs: saved, activeIndex };
   Store.save('session');
@@ -1509,45 +1493,19 @@ function setTabMeta(id, patch) {
   Store.save('tabMeta');
 }
 
-function getTabGroup(id) {
-  return tabGroups.find((group) => group.id === id) || null;
-}
-
-function groupTabs(groupId) {
-  const ids = Array.from(tabSelection);
-  if (ids.length < 2) return;
-  const group = { id: groupId, name: getTabGroup(groupId).name, tabIds: ids, createdAt: Date.now() };
-  tabGroups = tabGroups.map((g) => (g.id === groupId ? group : g));
-  ids.forEach((id) => setTabMeta(id, { groupId }));
-  tabSelection.clear();
-  tabSelectionMode = false;
-  renderTabs();
-  toast('Tabs grouped');
-}
-
-function ungroupTabs(groupId) {
-  const group = getTabGroup(groupId);
-  if (!group) return;
-  group.tabIds.forEach((id) => setTabMeta(id, { groupId: null }));
-  tabGroups = tabGroups.filter((g) => g.id !== groupId);
-  renderTabs();
-  toast('Group removed');
-}
-
-function openTabGroup(groupId) {
-  const group = getTabGroup(groupId);
-  if (!group) return;
-  tabGroupFilter = groupId;
-  closeTabSheet();
-  closeMenu();
-  openTabSheet();
-  renderTabs();
-}
-
-function closeTabGroupView() {
-  tabGroupFilter = null;
-  closeTabSheet();
-  openTabSheet();
+/* Tab groups were removed; drop their groupId links from saved tab metadata. */
+function normalizeTabMeta(meta) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return {};
+  const cleaned = {};
+  Object.keys(meta).forEach((id) => {
+    const entry = meta[id];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+    const next = { ...entry };
+    delete next.groupId;
+    if (next.pinned !== true) delete next.pinned;
+    if (Object.keys(next).length) cleaned[id] = next;
+  });
+  return cleaned;
 }
 
 /* ------------------------------------------- Media & downloads per tab */
@@ -1654,193 +1612,41 @@ function tabCardMarkup(tab) {
   const isActive = tab.id === activeTabId;
   const meta = getTabMeta(tab.id);
   const isPinned = meta.pinned === true;
-  const group = meta.groupId ? getTabGroup(meta.groupId) : null;
-
+  const badges = tabDownloadBadgesMarkup(tab.id);
+  const mediaHint = mediaHintForTab(tab.id);
   const title = tab.title || 'New tab';
   const host = hostOf(tab.url) || (isActive ? 'Start page' : 'Empty tab');
   const monogram = (host.replace(/^www\./i, '')[0] || '?').toUpperCase();
   const favicon = tab.url && isHttpUrl(tab.url) ? faviconMarkup(tab.url) : '';
   const icon = favicon || `<span class="favicon">${escapeHtml(monogram)}</span>`;
-
+  const pinnedBtn = `<button class="tab-pin-btn${isPinned ? ' is-pinned' : ''}" type="button" data-tab-pin="${tab.id}" aria-pressed="${isPinned}" aria-label="${isPinned ? 'Unpin tab' : 'Pin tab'}"><svg class="icon icon-sm" viewBox="0 0 24 24">${ICONS.pin}</svg></button>`;
   const classes = 'tab-card tab-row' + (isActive ? ' is-active' : '') + (isPinned ? ' is-pinned' : '');
-  const badges = tabDownloadBadgesMarkup(tab.id);
-  const mediaHint = mediaHintForTab(tab.id);
-  const groupHint = group ? ' · ' + group.name : '';
-  const groupLabel = group ? 'Change group: ' + group.name : 'Add to group';
+  const closeLabel = `Close tab: ${escapeHtml(title)}`;
 
   return `
     <div class="${classes}" role="button" tabindex="0" data-tab-id="${tab.id}" aria-label="${escapeHtml(title + mediaHint)}" aria-pressed="${isActive}">
       <span class="tab-favicon">${icon}</span>
       <div class="tab-meta">
-        <div class="tab-title-line">
-          <div class="tab-title">${escapeHtml(title)}</div>
-          <button class="tab-group-btn${group ? ' is-grouped' : ''}" type="button" data-tab-group="${tab.id}" aria-label="${escapeHtml(groupLabel + ': ' + title)}" title="${escapeHtml(group ? group.name : 'Add to group')}">
-            ${svgIcon(group ? 'layers' : 'folder', 'icon icon-xs')}
-          </button>
-        </div>
-        <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}${escapeHtml(groupHint)}</div>
+        <div class="tab-title">${escapeHtml(title)}</div>
+        <div class="tab-host">${escapeHtml(host)}${isActive ? ' · Active' : ''}</div>
       </div>
       ${badges}
-      <button class="tab-row-action tab-close" type="button" data-close-tab="${tab.id}" aria-label="Close tab: ${escapeHtml(title)}">
+      ${pinnedBtn}
+      <button class="tab-row-action tab-close" type="button" data-close-tab="${tab.id}" aria-label="${closeLabel}">
         ${svgIcon('close', 'icon icon-sm')}
       </button>
     </div>`;
 }
 
-function toggleTabSelection() {
-  tabSelectionMode = !tabSelectionMode;
-  if (!tabSelectionMode) {
-    tabSelection.clear();
-  }
+
+
+/* ---------------------------------------------------------------- Tab pins */
+
+function toggleTabPin(id) {
+  const meta = getTabMeta(id);
+  setTabMeta(id, { pinned: !meta.pinned });
   renderTabs();
-}
-
-function groupSelectedTabs() {
-  if (tabSelection.size < 2) return;
-  openDialog({
-    title: 'New tab group',
-    message: 'Enter a name for this group of tabs.',
-    confirmLabel: 'Create group',
-    body: (body) => {
-      const label = el('label', 'dialog-field-label', 'Group name');
-      label.setAttribute('for', 'groupNameInput');
-      const input = el('input', 'text-input');
-      input.id = 'groupNameInput';
-      input.type = 'text';
-      input.maxLength = 40;
-      input.placeholder = 'e.g. Work, Research, Shopping';
-      input.autocomplete = 'off';
-      input.value = 'Tab Group';
-      body.append(label, input);
-      window.setTimeout(() => { input.focus(); input.select(); }, 60);
-    },
-    onConfirm: () => {
-      const input = $('groupNameInput');
-      const name = input ? input.value.trim() : '';
-      if (!name) {
-        toast('Enter a group name');
-        return false;
-      }
-      const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const group = { id: groupId, name, tabIds: Array.from(tabSelection), createdAt: Date.now() };
-      tabGroups.push(group);
-      Store.save('tabGroups');
-      tabSelection.forEach((id) => setTabMeta(id, { groupId }));
-      tabSelection.clear();
-      tabSelectionMode = false;
-      renderTabs();
-      toast('Tab group created');
-    }
-  });
-}
-function assignTabToGroupId(tabId, groupId) {
-  const group = getTabGroup(groupId);
-  if (!group) return;
-  const previousId = getTabMeta(tabId).groupId;
-  if (previousId && previousId !== groupId) {
-    const previous = getTabGroup(previousId);
-    if (previous) previous.tabIds = previous.tabIds.filter((id) => id !== tabId);
-  }
-  if (!group.tabIds.includes(tabId)) group.tabIds.push(tabId);
-  tabGroups = tabGroups.filter((item) => item.id === groupId || item.tabIds.length > 0);
-  setTabMeta(tabId, { groupId });
-  Store.save('tabGroups');
-  renderTabs();
-  toast('Added to ' + group.name);
-}
-
-function removeTabFromGroup(tabId) {
-  const meta = getTabMeta(tabId);
-  if (!meta.groupId) return;
-  const group = getTabGroup(meta.groupId);
-  if (group) group.tabIds = group.tabIds.filter((id) => id !== tabId);
-  tabGroups = tabGroups.filter((item) => item.tabIds.length > 0);
-  setTabMeta(tabId, { groupId: null });
-  Store.save('tabGroups');
-  renderTabs();
-  toast('Removed from group');
-}
-
-function createGroupForTab(tabId) {
-  openDialog({
-    title: 'New tab group',
-    message: 'Enter a name for this group.',
-    confirmLabel: 'Create group',
-    body: (body) => {
-      const label = el('label', 'dialog-field-label', 'Group name');
-      label.setAttribute('for', 'groupNameInput');
-      const input = el('input', 'text-input');
-      input.id = 'groupNameInput';
-      input.type = 'text';
-      input.maxLength = 40;
-      input.placeholder = 'e.g. Work, Research, Shopping';
-      input.autocomplete = 'off';
-      input.value = 'Tab Group';
-      body.append(label, input);
-      window.setTimeout(() => { input.focus(); input.select(); }, 60);
-    },
-    onConfirm: () => {
-      const input = $('groupNameInput');
-      const name = input ? input.value.trim() : '';
-      if (!name) {
-        toast('Enter a group name');
-        return false;
-      }
-      const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      tabGroups.push({ id: groupId, name, tabIds: [tabId], createdAt: Date.now() });
-      setTabMeta(tabId, { groupId });
-      Store.save('tabGroups');
-      renderTabs();
-      toast('Group created');
-    }
-  });
-}
-
-function assignTabToGroup(tabId) {
-  const meta = getTabMeta(tabId);
-  const groups = validTabGroups();
-  const options = groups.map((group) => ({
-    value: group.id,
-    label: group.name,
-    desc: group.tabIds.length + (group.tabIds.length === 1 ? ' tab' : ' tabs') + (meta.groupId === group.id ? ' · current' : '')
-  }));
-  options.push({ value: '__new', label: 'New group…', desc: 'Create a group and add this tab' });
-  if (meta.groupId) {
-    options.push({ value: '__remove', label: 'Remove from group', desc: 'Keep this tab ungrouped' });
-  }
-  openChoice('Add to group', options, meta.groupId || '', (value) => {
-    if (value === '__new') createGroupForTab(tabId);
-    else if (value === '__remove') removeTabFromGroup(tabId);
-    else assignTabToGroupId(tabId, value);
-  }, { keepTabs: true });
-}
-
-function validTabGroups() {
-  return (Array.isArray(tabGroups) ? tabGroups : []).filter(
-    (group) => group && group.id && group.name && Array.isArray(group.tabIds)
-  );
-}
-
-function groupCardMarkup(group) {
-  const tabIds = Array.isArray(group.tabIds) ? group.tabIds : [];
-  const tabCount = tabIds.length;
-  const isActiveGroup = tabIds.indexOf(activeTabId) !== -1;
-  const firstTab = tabs.find((tab) => tab.id === tabIds[0]);
-  const host = firstTab ? hostOf(firstTab.url) : '';
-
-  return `
-    <div class="tab-card group-row${isActiveGroup ? ' is-active' : ''}" role="button" tabindex="0" data-group-id="${group.id}" aria-label="Open group: ${escapeHtml(group.name)}">
-      <span class="group-icon">
-        ${svgIcon('layers', 'icon')}
-      </span>
-      <div class="tab-meta">
-        <div class="tab-title">${escapeHtml(group.name)}</div>
-        <div class="tab-host">${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}${host ? ' · ' + escapeHtml(host) : ''}</div>
-      </div>
-      <button class="tab-row-action" type="button" data-group-close="${group.id}" aria-label="Close group: ${escapeHtml(group.name)}">
-        ${svgIcon('close', 'icon icon-sm')}
-      </button>
-    </div>`;
+  saveSession();
 }
 
 function renderTabs() {
@@ -1850,18 +1656,30 @@ function renderTabs() {
   const hasTabs = tabs.length > 0;
   dom.tabsEmpty.classList.toggle('hidden', hasTabs);
 
-  if (!hasTabs) {
-    dom.tabsList.innerHTML = '';
-    return;
-  }
+  const metaById = {};
+  tabs.forEach((tab) => { metaById[tab.id] = getTabMeta(tab.id); });
 
+  const pinned = tabs.filter((tab) => metaById[tab.id].pinned === true);
+  const others = tabs.filter((tab) => metaById[tab.id].pinned !== true);
+
+  const allTabs = [...pinned, ...others];
+
+  let html = '';
   try {
-    dom.tabsList.innerHTML = '<div class="tab-grid">' + tabs.map(tabCardMarkup).join('') + '</div>';
+    html += '<div class="tab-grid">' + allTabs.map(tabCardMarkup).join('') + '</div>';
   } catch (error) {
     /* One malformed card must never blank the whole tab manager. */
-    console.warn('[4keeper] Tab render failed:', error);
-    dom.tabsList.innerHTML = '';
+    console.warn('[4keeper] Tab render fell back to a flat list:', error);
+    html = '';
+    try {
+      if (allTabs.length) {
+        html += '<div class="tab-grid">' + allTabs.map(tabCardMarkup).join('') + '</div>';
+      }
+    } catch (inner) {
+      html = '';
+    }
   }
+  dom.tabsList.innerHTML = html;
 }
 
 async function createTabWithUrl(url, activate) {
@@ -1980,23 +1798,16 @@ async function closeTab(id) {
     toast('Could not close the tab');
     return;
   }
-  tabSelection.delete(id);
   dropTabMedia(id);
   if (tabDownloadIndex[id]) {
     delete tabDownloadIndex[id];
     updateDownloadsIndicator();
   }
+  // Cleanup pin state
   const meta = getTabMeta(id);
-  if (meta.groupId) {
-    tabGroups = tabGroups.map((group) => {
-      if (group.id !== meta.groupId) return group;
-      const next = Object.assign({}, group);
-      next.tabIds = group.tabIds.filter((tid) => tid !== id);
-      return next;
-    });
-    tabGroups = tabGroups.filter((group) => group.tabIds.length > 0);
-    Store.save('tabGroups');
-  }
+  delete meta.pinned;
+  if (Object.keys(meta).length === 0) delete tabMeta[id];
+  else Store.save('tabMeta');
   await refreshTabs();
   if (!tabs.length) {
     await createTabWithUrl(getHomePage(), true);
@@ -2006,18 +1817,58 @@ async function closeTab(id) {
   saveSession();
 }
 
+function pinnedCount() {
+  return tabs.filter((tab) => getTabMeta(tab.id).pinned === true).length;
+}
+
+/* Native tab ids restart from 1 on every launch, so stale pin flags saved in
+ * tabMeta must be cleared before the session restore rewrites them. */
+function clearPinnedMeta() {
+  let changed = false;
+  Object.keys(tabMeta).forEach((key) => {
+    const entry = tabMeta[key];
+    if (!entry || typeof entry !== 'object') return;
+    if (entry.pinned === undefined) return;
+    delete entry.pinned;
+    changed = true;
+    if (Object.keys(entry).length === 0) delete tabMeta[key];
+  });
+  if (changed) Store.save('tabMeta');
+}
+
 async function closeAllTabs() {
-  try {
-    await callPlugin('closeAllTabs', { url: getHomePage() });
-  } catch (error) {
-    toast('Could not close tabs');
-    return;
+  const pinned = tabs.filter((tab) => getTabMeta(tab.id).pinned === true);
+  const closingCount = tabs.length - pinned.length;
+  if (!pinned.length) {
+    // No pinned tabs: use native closeAllTabs
+    try {
+      await callPlugin('closeAllTabs', { url: getHomePage() });
+    } catch (error) {
+      toast('Could not close tabs');
+      return;
+    }
+    tabMedia = {};
+  } else {
+    // Close all unpinned tabs while preserving pinned ones
+    for (const tab of tabs) {
+      if (getTabMeta(tab.id).pinned !== true) {
+        try { await callPlugin('closeTab', { id: tab.id }); } catch {}
+        dropTabMedia(tab.id);
+        delete tabDownloadIndex[tab.id];
+        delete tabMeta[tab.id];
+      }
+    }
+    Store.save('tabMeta');
+    await refreshTabs();
   }
-  tabMedia = {};
-  await refreshTabs();
   syncActiveTabUi();
   syncNav();
   saveSession();
+  if (pinned.length) {
+    toast(closingCount
+      ? 'Closed ' + closingCount + (closingCount === 1 ? ' tab' : ' tabs') + ' · pinned tabs kept'
+      : 'All tabs are pinned');
+  }
 }
 
 /* ------------------------------------------------------------ Suggestions */
@@ -3500,12 +3351,12 @@ function attachUiListeners() {
     if (!tabs.length) return;
     openDialog({
       title: 'Close all tabs?',
-      message: 'All open tabs will be closed and a new tab will open.',
+      message: pinnedCount()
+        ? 'All open tabs will be closed. Pinned tabs will stay open.'
+        : 'All open tabs will be closed and a new tab will open.',
       confirmLabel: 'Close all',
       destructive: true,
-      onConfirm: () => {
-        closeAllTabs();
-      }
+      onConfirm: () => closeAllTabs()
     });
   });
   dom.tabsList.addEventListener('click', (event) => {
@@ -3513,62 +3364,7 @@ function attachUiListeners() {
     if (pinButton) {
       event.stopPropagation();
       const id = Number(pinButton.getAttribute('data-tab-pin'));
-      const meta = getTabMeta(id);
-      setTabMeta(id, { pinned: !meta.pinned });
-      renderTabs();
-      return;
-    }
-    const groupAssign = event.target.closest('[data-tab-group]');
-    if (groupAssign) {
-      event.stopPropagation();
-      assignTabToGroup(Number(groupAssign.getAttribute('data-tab-group')));
-      return;
-    }
-    const checkButton = event.target.closest('[data-tab-check]');
-    if (checkButton) {
-      event.stopPropagation();
-      const id = Number(checkButton.getAttribute('data-tab-check'));
-      if (tabSelection.has(id)) tabSelection.delete(id);
-      else tabSelection.add(id);
-      renderTabs();
-      return;
-    }
-    const groupButton = event.target.closest('[data-group-close]');
-    if (groupButton) {
-      event.stopPropagation();
-      const groupId = groupButton.getAttribute('data-group-close');
-      openDialog({
-        title: 'Close group?',
-        message: 'The group will be removed and its tabs will stay open.',
-        confirmLabel: 'Close group',
-        destructive: true,
-        onConfirm: () => ungroupTabs(groupId)
-      });
-      return;
-    }
-    const groupBack = event.target.closest('[data-group-back]');
-    if (groupBack) {
-      event.stopPropagation();
-      closeTabGroupView();
-      return;
-    }
-    const groupUngroup = event.target.closest('[data-group-ungroup]');
-    if (groupUngroup) {
-      event.stopPropagation();
-      const groupId = groupUngroup.getAttribute('data-group-ungroup');
-      openDialog({
-        title: 'Ungroup tabs?',
-        message: 'The group will be removed and its tabs will move to the main tab list.',
-        confirmLabel: 'Ungroup',
-        destructive: true,
-        onConfirm: () => ungroupTabs(groupId)
-      });
-      return;
-    }
-    const groupCard = event.target.closest('[data-group-id]');
-    if (groupCard) {
-      event.stopPropagation();
-      openTabGroup(groupCard.getAttribute('data-group-id'));
+      toggleTabPin(id);
       return;
     }
     const closeButton = event.target.closest('[data-close-tab]');
@@ -3579,17 +3375,12 @@ function attachUiListeners() {
     }
     const card = event.target.closest('[data-tab-id]');
     if (card) {
-      if (suppressTabClick) {
-        suppressTabClick = false;
-        return;
-      }
-      if (tabSelectionMode) return;
       switchTab(Number(card.getAttribute('data-tab-id')));
     }
   });
   dom.tabsList.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
-    if (event.target.closest('[data-tab-group]') || event.target.closest('[data-close-tab]')) return;
+    if (event.target.closest('[data-tab-pin]') || event.target.closest('[data-close-tab]')) return;
     const card = event.target.closest('[data-tab-id]');
     if (!card) return;
     event.preventDefault();
@@ -3608,8 +3399,7 @@ function attachUiListeners() {
       { value: 'duplicate', label: 'Duplicate tab', desc: 'Open the same page in a new tab' }
     ], '', (value) => {
       if (value === 'pin') {
-        setTabMeta(id, { pinned: !meta.pinned });
-        renderTabs();
+        toggleTabPin(id);
       } else if (value === 'close') {
         closeTab(id);
       } else if (value === 'closeOthers') {
@@ -3618,7 +3408,7 @@ function attachUiListeners() {
         const tab = tabs.find((t) => t.id === id);
         if (tab) newTab(tab.url);
       }
-    });
+    }, { keepTabs: true });
   });
 
   dom.closeMenuBtn.addEventListener('click', closeMenu);
@@ -4070,6 +3860,7 @@ async function exitApp() {
 /* ------------------------------------------------------------------- Boot */
 
 async function restoreSession() {
+  clearPinnedMeta();
   if (settings.startup === 'newtab') {
     try {
       await callPlugin('createTab', { url: '', activate: true });
@@ -4085,7 +3876,7 @@ async function restoreSession() {
   const saved = Array.isArray(session.tabs)
     ? session.tabs
         .filter((tab) => tab && isHttpUrl(tab.url))
-        .map((tab) => ({ url: buildHomeUrl(tab.url), title: tab.title || '' }))
+        .map((tab) => ({ url: buildHomeUrl(tab.url), title: tab.title || '', pinned: tab.pinned === true }))
         .slice(0, 8)
     : [];
   if (settings.startup === 'home' || !saved.length) {
@@ -4104,6 +3895,9 @@ async function restoreSession() {
   try {
     const result = await callPlugin('getTabs');
     const list = Array.isArray(result && result.tabs) ? result.tabs : [];
+    list.forEach((nativeTab, i) => {
+      if (nativeTab && saved[i] && saved[i].pinned) setTabMeta(nativeTab.id, { pinned: true });
+    });
     const index = Math.min(Math.max(Number(session.activeIndex) || 0, 0), Math.max(list.length - 1, 0));
     if (list[index]) await callPlugin('switchTab', { id: list[index].id });
   } catch (error) {

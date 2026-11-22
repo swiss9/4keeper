@@ -2501,7 +2501,7 @@ html.page-behind .browser {
   right: 14px;
 }
 
-/* Pinned rows keep the same density as regular rows. */
+/* Pinned tabs read as active: bright pushpin on a soft accent chip. */
 .tab-card.tab-row.is-pinned .tab-pin-btn {
   color: var(--accent);
   background: var(--accent-soft);

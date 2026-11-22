@@ -119,7 +119,12 @@ const ICONS = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   pin: '<path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6Z"/><path d="M12 14v7"/>',
-  upload: '<path d="M12 21V9m-5 5 5-5 5 5"/><path d="M5 3h14"/>'
+  upload: '<path d="M12 21V9m-5 5 5-5 5 5"/><path d="M5 3h14"/>',
+  video: '<rect x="3" y="6" width="12" height="12" rx="2.5"/><path d="m15 10.5 6-3.5v10l-6-3.5Z"/>',
+  audio: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
+  torrent: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/><path d="M12 8v8m-3-3 3 3 3-3"/>',
+  inbox: '<path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4Z"/>'
 };
 
 const svgIcon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
@@ -142,6 +147,12 @@ let downloadsCache = [];
 let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
 let downloadsFilter = 'all';
 let dashboardActive = true;
+let dashboardStatusFilter = 'all';
+let dashboardCategory = 'all';
+let dashboardQuery = '';
+let dashboardSearchOpen = false;
+let dashboardBusy = false;
+let dashboardRefreshToken = 0;
 let tabMedia = {};
 let tabDownloadIndex = {};
 let mediaToastAt = 0;
@@ -188,8 +199,21 @@ const dom = {
   dashboardSection: $('dashboardSection'),
   dashboardForm: $('dashboardForm'),
   dashboardInput: $('dashboardInput'),
-  dashboardBrowserBtn: $('dashboardBrowserBtn'),
-  dashboardDownloadsBtn: $('dashboardDownloadsBtn'),
+  dashboardStorage: $('dashboardStorage'),
+  dashboardMenuBtn: $('dashboardMenuBtn'),
+  dashboardSearchBtn: $('dashboardSearchBtn'),
+  dashboardSearch: $('dashboardSearch'),
+  dashboardSearchInput: $('dashboardSearchInput'),
+  dashboardSearchClear: $('dashboardSearchClear'),
+  dashboardGlobeBtn: $('dashboardGlobeBtn'),
+  dashboardFilters: $('dashboardFilters'),
+  dashboardCategories: $('dashboardCategories'),
+  dashboardQueue: $('dashboardQueue'),
+  downloadFab: $('downloadFab'),
+  downloadSheet: $('downloadSheet'),
+  downloadSheetBackdrop: $('downloadSheetBackdrop'),
+  downloadSheetClose: $('downloadSheetClose'),
+  downloadPasteBtn: $('downloadPasteBtn'),
   dashboardMedia: $('dashboardMedia'),
   dashboardMediaList: $('dashboardMediaList'),
   dashboardMediaCount: $('dashboardMediaCount'),
@@ -953,6 +977,7 @@ function syncNativeVisibility() {
     dom.dashboardSection.classList.toggle('is-hidden', !dashboardActive);
     dom.dashboardSection.setAttribute('aria-hidden', dashboardActive ? 'false' : 'true');
   }
+  if (dom.downloadFab) dom.downloadFab.classList.toggle('is-off', !dashboardActive);
   dom.startScreen.classList.toggle('is-hidden', dashboardActive || hasPage || overlay);
 
   if (!overlay && !dashboardActive) {
@@ -1000,6 +1025,7 @@ function closeOtherSheets(keep) {
   if (keep !== 'menu') closeMenu();
   if (keep !== 'siteInfo') closeSiteInfo();
   if (keep !== 'choice' && keep !== 'choiceTabs') closeChoice();
+  if (keep !== 'downloadSheet') closeDownloadSheet();
 }
 
 function attachSheetDrag(sheet, closeFn) {
@@ -1061,6 +1087,7 @@ function attachSheetDrags() {
   if (dom.menuSheet) attachSheetDrag(dom.menuSheet, closeMenu);
   if (dom.siteInfoSheet) attachSheetDrag(dom.siteInfoSheet, closeSiteInfo);
   if (dom.choiceSheet) attachSheetDrag(dom.choiceSheet, closeChoice);
+  if (dom.downloadSheet) attachSheetDrag(dom.downloadSheet, closeDownloadSheet);
 }
 
 function openTabSheet() {
@@ -1095,6 +1122,7 @@ function openMenu() {
   dom.menuSheet.setAttribute('aria-hidden', 'false');
   dom.menuBackdrop.classList.add('open');
   dom.menuBtn.setAttribute('aria-expanded', 'true');
+  if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'true');
   closeOtherSheets('menu');
   updateMenuCounts();
   updateMenuBookmark();
@@ -1177,6 +1205,7 @@ function toggleReadingMode() {
 
 function closeMenu() {
   dom.menuBtn.setAttribute('aria-expanded', 'false');
+  if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
   closeSheet('menu', dom.menuSheet, dom.menuBackdrop);
 }
 
@@ -1830,6 +1859,327 @@ function renderDashboardMedia() {
   }).join('');
 }
 
+const DASHBOARD_CATEGORY_ICONS = {
+  videos: 'video',
+  music: 'audio',
+  docs: 'file',
+  torrents: 'torrent',
+  others: 'folder'
+};
+
+const DASHBOARD_CATEGORY_LABELS = {
+  videos: 'Video',
+  music: 'Audio',
+  docs: 'Document',
+  torrents: 'Torrent',
+  others: 'File'
+};
+
+const DASHBOARD_STATUS_RANK = { downloading: 0, error: 1, finished: 2, other: 3 };
+
+function downloadCategory(item) {
+  const mime = String((item && item.mime) || '').toLowerCase();
+  const name = String((item && item.filename) || '').toLowerCase();
+  const url = String((item && item.url) || '').toLowerCase();
+  if (mime.indexOf('bittorrent') !== -1 || /\.torrent($|\?)/.test(name) || /\.torrent($|\?)/.test(url)) {
+    return 'torrents';
+  }
+  if (mime.indexOf('video/') === 0 || /\.(mp4|mkv|webm|avi|mov|m4v|3gp|flv|ts)$/.test(name)) return 'videos';
+  if (mime.indexOf('audio/') === 0 || /\.(mp3|m4a|aac|flac|wav|ogg|opus)$/.test(name)) return 'music';
+  if (
+    /^(application\/pdf|application\/msword|application\/vnd\.openxmlformats|text\/)/.test(mime) ||
+    /\.(pdf|docx?|xlsx?|pptx?|txt|csv|epub|odt|rtf)$/.test(name)
+  ) {
+    return 'docs';
+  }
+  return 'others';
+}
+
+function downloadStatusGroup(item) {
+  const status = String((item && item.status) || '').toLowerCase();
+  if (status === 'successful' || status === 'completed') return 'finished';
+  if (status === 'failed' || status === 'unknown') return 'error';
+  if (status === 'running' || status === 'pending' || status === 'paused') return 'downloading';
+  return 'other';
+}
+
+function dashboardPercent(item) {
+  const bytes = Number(item && item.bytes) || 0;
+  const total = Number(item && item.totalBytes) || 0;
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((bytes / total) * 100)));
+}
+
+function dashboardMetaText(item, group) {
+  const bytes = Number(item.bytes) || 0;
+  const total = Number(item.totalBytes) || 0;
+  if (group === 'downloading') {
+    if (total > 0) {
+      return dashboardPercent(item) + '% · ' + formatBytes(bytes) + ' of ' + formatBytes(total);
+    }
+    return bytes > 0 ? formatBytes(bytes) + ' downloaded' : 'Starting…';
+  }
+  if (group === 'finished') {
+    const size = total > 0 ? total : bytes;
+    return size > 0 ? formatBytes(size) : 'Downloaded';
+  }
+  return downloadStatus(item);
+}
+
+function dashboardTypeLabel(item, category) {
+  const name = String((item && item.filename) || '');
+  const ext = name.indexOf('.') === -1 ? '' : name.split('.').pop();
+  if (ext && ext.length <= 5 && /^[a-z0-9]+$/i.test(ext)) return ext.toUpperCase();
+  const mime = String((item && item.mime) || '');
+  if (mime) {
+    const tail = mime.split('/').pop();
+    if (tail && tail !== '*' && tail.indexOf('.') === -1) return tail.toUpperCase();
+  }
+  return DASHBOARD_CATEGORY_LABELS[category] || 'File';
+}
+
+function dashboardCounts() {
+  const counts = { all: downloadsCache.length, downloading: 0, finished: 0, error: 0 };
+  downloadsCache.forEach((item) => {
+    const group = downloadStatusGroup(item);
+    if (group === 'downloading' || group === 'finished' || group === 'error') counts[group] += 1;
+  });
+  return counts;
+}
+
+function dashboardDownloadItems() {
+  const query = dashboardQuery.trim().toLowerCase();
+  const items = downloadsCache.filter((item) => {
+    if (dashboardStatusFilter !== 'all' && downloadStatusGroup(item) !== dashboardStatusFilter) return false;
+    if (dashboardCategory !== 'all' && downloadCategory(item) !== dashboardCategory) return false;
+    if (query) {
+      const haystack = (String(item.filename || '') + ' ' + String(item.url || '')).toLowerCase();
+      if (haystack.indexOf(query) === -1) return false;
+    }
+    return true;
+  });
+  return items.sort((a, b) => {
+    const rank = (DASHBOARD_STATUS_RANK[downloadStatusGroup(a)] || 0) - (DASHBOARD_STATUS_RANK[downloadStatusGroup(b)] || 0);
+    if (rank) return rank;
+    return (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
+  });
+}
+
+function dashboardRowMarkup(item) {
+  const group = downloadStatusGroup(item);
+  const category = downloadCategory(item);
+  const percent = dashboardPercent(item);
+  const missing = item.exists === false;
+  const canOpen = group === 'finished' && !missing;
+  const dotClass = group === 'downloading' ? 'is-running' : group === 'finished' ? 'is-done' : group === 'error' ? 'is-error' : '';
+  const meta = missing ? 'File removed' : dashboardMetaText(item, group);
+  const showProgress = group === 'downloading' && Number(item.totalBytes) > 0;
+  return `
+    <div class="dl-row" data-download-id="${escapeHtml(item.id)}" data-dl-group="${group}">
+      <span class="dl-row-icon" aria-hidden="true">${svgIcon(DASHBOARD_CATEGORY_ICONS[category] || 'file', 'icon icon-sm')}</span>
+      <div class="dl-row-main">
+        <div class="dl-row-name" title="${escapeHtml(item.filename || 'Download')}">${escapeHtml(item.filename || 'Download')}</div>
+        <div class="dl-row-meta">
+          <span class="dl-status-dot ${dotClass}" aria-hidden="true"></span>
+          <span data-dl-meta>${escapeHtml(meta)}</span>
+          <span>· ${escapeHtml(dashboardTypeLabel(item, category))}</span>
+        </div>
+        ${
+          showProgress
+            ? `<div class="dl-progress" data-dl-progress role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div>`
+            : ''
+        }
+      </div>
+      <div class="dl-row-actions">
+        <button class="dl-row-btn" type="button" data-dashboard-open="${escapeHtml(item.id)}" aria-label="Open download"${canOpen ? '' : ' disabled'}>
+          ${svgIcon('external', 'icon icon-xs')}
+        </button>
+        <button class="dl-row-btn" type="button" data-dashboard-remove="${escapeHtml(item.id)}" aria-label="Remove download">
+          ${svgIcon('trash', 'icon icon-xs')}
+        </button>
+      </div>
+    </div>`;
+}
+
+function dashboardEmptyMarkup() {
+  const filtering = dashboardStatusFilter !== 'all' || dashboardCategory !== 'all' || dashboardQuery.trim() !== '';
+  if (filtering && downloadsCache.length) {
+    return `
+      <div class="dl-empty">
+        <div class="dl-empty-body">
+          <span class="dl-empty-icon" aria-hidden="true">${svgIcon('search', 'icon')}</span>
+          <div class="dl-empty-title">No matching downloads</div>
+          <div class="dl-empty-text">Nothing matches this tab, category or search.</div>
+          <button class="dl-empty-reset" type="button" data-dashboard-reset>Clear filters</button>
+        </div>
+      </div>`;
+  }
+  const ghost =
+    '<div class="dl-ghost"><span class="dl-ghost-icon"></span><span class="dl-ghost-lines"><span></span><span></span></span></div>';
+  return `
+    <div class="dl-empty">
+      <div class="dl-ghost-list" aria-hidden="true">${ghost.repeat(3)}</div>
+      <div class="dl-empty-body">
+        <span class="dl-empty-icon" aria-hidden="true">${svgIcon('inbox', 'icon')}</span>
+        <div class="dl-empty-title">No active downloads</div>
+        <div class="dl-empty-text">Tap + to paste a link and start downloading.</div>
+      </div>
+    </div>`;
+}
+
+function updateDashboardStorage() {
+  if (!dom.dashboardStorage) return;
+  const used = Number(downloadsUsage.usedBytes) || 0;
+  const total = Number(downloadsUsage.totalBytes) || 0;
+  if (total > 0) {
+    dom.dashboardStorage.textContent = formatBytes(used) + ' of ' + formatBytes(total) + ' used';
+    return;
+  }
+  const count = downloadsCache.length;
+  dom.dashboardStorage.textContent = count ? count + (count === 1 ? ' download' : ' downloads') : 'Download manager';
+}
+
+function syncDashboardFilters() {
+  if (dom.dashboardFilters) {
+    dom.dashboardFilters.querySelectorAll('[data-dl-status]').forEach((button) => {
+      const active = button.getAttribute('data-dl-status') === dashboardStatusFilter;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+  if (dom.dashboardCategories) {
+    dom.dashboardCategories.querySelectorAll('[data-dl-category]').forEach((button) => {
+      const active = button.getAttribute('data-dl-category') === dashboardCategory;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+}
+
+function renderDashboardQueue() {
+  if (!dom.dashboardQueue) return;
+  const counts = dashboardCounts();
+  if (dom.dashboardFilters) {
+    dom.dashboardFilters.querySelectorAll('[data-dl-count]').forEach((node) => {
+      const key = node.getAttribute('data-dl-count');
+      node.textContent = String(counts[key] || 0);
+    });
+  }
+  syncDashboardFilters();
+  const items = dashboardDownloadItems();
+  dom.dashboardQueue.innerHTML = items.length ? items.map(dashboardRowMarkup).join('') : dashboardEmptyMarkup();
+  updateDashboardStorage();
+}
+
+async function refreshDashboardDownloads() {
+  const token = ++dashboardRefreshToken;
+  await fetchDownloads();
+  if (token !== dashboardRefreshToken || !dashboardActive) return;
+  renderDashboardQueue();
+}
+
+function updateDashboardProgress(data) {
+  if (!dashboardActive || !dom.dashboardQueue) return;
+  const id = Number(data && data.id);
+  const item = downloadsCache.find((entry) => Number(entry.id) === id);
+  if (!item) return;
+  const row = dom.dashboardQueue.querySelector('[data-download-id="' + id + '"]');
+  if (!row) return;
+  const group = downloadStatusGroup(item);
+  if (row.getAttribute('data-dl-group') !== group) {
+    renderDashboardQueue();
+    return;
+  }
+  const meta = row.querySelector('[data-dl-meta]');
+  if (meta) meta.textContent = item.exists === false ? 'File removed' : dashboardMetaText(item, group);
+  const bar = row.querySelector('[data-dl-progress]');
+  if (bar) {
+    const percent = dashboardPercent(item);
+    bar.setAttribute('aria-valuenow', String(percent));
+    const fill = bar.firstElementChild;
+    if (fill) fill.style.width = percent + '%';
+  }
+}
+
+function setDashboardSearch(open) {
+  dashboardSearchOpen = !!open;
+  if (dom.dashboardSearch) dom.dashboardSearch.classList.toggle('hidden', !dashboardSearchOpen);
+  if (dom.dashboardSearchBtn) dom.dashboardSearchBtn.setAttribute('aria-expanded', dashboardSearchOpen ? 'true' : 'false');
+  if (dashboardSearchOpen) {
+    window.setTimeout(() => {
+      if (dom.dashboardSearchInput) dom.dashboardSearchInput.focus();
+    }, 40);
+    return;
+  }
+  if (dom.dashboardSearchInput) {
+    dom.dashboardSearchInput.value = '';
+    dom.dashboardSearchInput.blur();
+  }
+  if (dashboardQuery) {
+    dashboardQuery = '';
+    renderDashboardQueue();
+  }
+}
+
+function openBrowserFromDashboard() {
+  const tab = activeTab();
+  if (tab && isHttpUrl(tab.url)) {
+    leaveDashboard();
+    return;
+  }
+  navigate(getHomePage());
+}
+
+function openDownloadSheet() {
+  closeTabSheet();
+  closeMenu();
+  closeSiteInfo();
+  hideSuggestions();
+  overlays.add('downloadSheet');
+  if (dom.downloadSheet) {
+    dom.downloadSheet.classList.add('open');
+    dom.downloadSheet.setAttribute('aria-hidden', 'false');
+  }
+  if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.classList.add('open');
+  if (dom.downloadFab) dom.downloadFab.setAttribute('aria-expanded', 'true');
+  if (dom.dashboardInput) {
+    dom.dashboardInput.value = '';
+    window.setTimeout(() => {
+      if (overlays.has('downloadSheet')) dom.dashboardInput.focus();
+    }, 180);
+  }
+  syncNativeVisibility();
+}
+
+function closeDownloadSheet() {
+  const wasOpen = overlays.has('downloadSheet');
+  overlays.delete('downloadSheet');
+  if (dom.downloadSheet) {
+    dom.downloadSheet.classList.remove('open');
+    dom.downloadSheet.setAttribute('aria-hidden', 'true');
+  }
+  if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.classList.remove('open');
+  if (dom.downloadFab) dom.downloadFab.setAttribute('aria-expanded', 'false');
+  if (dom.dashboardInput) dom.dashboardInput.blur();
+  if (wasOpen) syncNativeVisibility();
+}
+
+async function pasteIntoDownloadInput() {
+  if (!dom.dashboardInput) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    const value = String(text || '').trim();
+    if (!value) {
+      toast('Clipboard is empty');
+      return;
+    }
+    dom.dashboardInput.value = value;
+    dom.dashboardInput.focus();
+  } catch (error) {
+    toast('Paste with the keyboard instead');
+  }
+}
+
 async function downloadDashboardMedia(index, button) {
   const item = dashboardMediaItems()[index];
   if (!item) return;
@@ -1851,11 +2201,12 @@ async function downloadDashboardMedia(index, button) {
   }
 }
 
-function showDashboard(options) {
+function showDashboard() {
   dashboardActive = true;
   closeTabSheet();
   closeMenu();
   closeSiteInfo();
+  closeDownloadSheet();
   hideSuggestions();
   nativeVisibleState = false;
   setNativeVisible(false);
@@ -1864,10 +2215,9 @@ function showDashboard(options) {
     dom.dashboardSection.setAttribute('aria-hidden', 'false');
   }
   renderDashboardMedia();
+  renderDashboardQueue();
   syncNativeVisibility();
-  if (options && options.focus && dom.dashboardInput) {
-    window.setTimeout(() => dom.dashboardInput.focus(), 40);
-  }
+  refreshDashboardDownloads();
 }
 
 function leaveDashboard() {
@@ -1880,27 +2230,50 @@ function leaveDashboard() {
   syncNativeVisibility();
 }
 
-function submitDashboardUrl() {
-  const value = dom.dashboardInput ? dom.dashboardInput.value.trim() : '';
-  if (!value) {
-    if (dom.dashboardInput) dom.dashboardInput.focus();
+async function submitDashboardUrl() {
+  const input = dom.dashboardInput;
+  const raw = input ? input.value.trim() : '';
+  if (!raw) {
+    if (input) input.focus();
     return;
   }
-  if (dom.dashboardInput) dom.dashboardInput.blur();
-  navigate(value);
-}
-
-function showBrowserView() {
-  const tab = activeTab();
-  if (!tab || !isHttpUrl(tab.url)) {
-    if (dom.dashboardInput) dom.dashboardInput.focus();
+  if (input) input.blur();
+  if (/^magnet:/i.test(raw)) {
+    toast('Torrent links are not supported yet');
     return;
   }
-  leaveDashboard();
+  let url = '';
+  if (isHttpUrl(raw)) url = raw;
+  else if (isProbablyUrl(raw) && !/^[a-z][a-z0-9+.-]*:/i.test(raw)) url = 'https://' + raw;
+  if (!url) {
+    closeDownloadSheet();
+    navigate(raw);
+    return;
+  }
+  if (dashboardBusy) return;
+  dashboardBusy = true;
+  const button = dom.dashboardForm ? dom.dashboardForm.querySelector('.dl-download-btn') : null;
+  if (button) button.disabled = true;
+  try {
+    await callPlugin('downloadMedia', { url });
+    closeDownloadSheet();
+    if (input) input.value = '';
+    if (!dashboardActive) showDashboard();
+    dashboardStatusFilter = 'all';
+    dashboardCategory = 'all';
+    syncDashboardFilters();
+    toast('Download started');
+    window.setTimeout(refreshDashboardDownloads, 600);
+  } catch (error) {
+    toast('Could not start this download');
+  } finally {
+    dashboardBusy = false;
+    if (button) button.disabled = false;
+  }
 }
 
 async function goHome() {
-  showDashboard({ focus: true });
+  showDashboard();
 }
 
 async function newTab(url) {
@@ -3456,16 +3829,81 @@ function attachUiListeners() {
         event.preventDefault();
         submitDashboardUrl();
       } else if (event.key === 'Escape') {
-        dom.dashboardInput.blur();
+        closeDownloadSheet();
       }
     });
   }
-  if (dom.dashboardBrowserBtn) {
-    dom.dashboardBrowserBtn.addEventListener('click', showBrowserView);
+  if (dom.dashboardMenuBtn) {
+    dom.dashboardMenuBtn.addEventListener('click', openMenu);
   }
-  if (dom.dashboardDownloadsBtn) {
-    dom.dashboardDownloadsBtn.addEventListener('click', openDownloads);
+  if (dom.dashboardGlobeBtn) {
+    dom.dashboardGlobeBtn.addEventListener('click', openBrowserFromDashboard);
   }
+  if (dom.dashboardSearchBtn) {
+    dom.dashboardSearchBtn.addEventListener('click', () => setDashboardSearch(!dashboardSearchOpen));
+  }
+  if (dom.dashboardSearchInput) {
+    dom.dashboardSearchInput.addEventListener('input', () => {
+      dashboardQuery = dom.dashboardSearchInput.value;
+      renderDashboardQueue();
+    });
+    dom.dashboardSearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setDashboardSearch(false);
+    });
+  }
+  if (dom.dashboardSearchClear) {
+    dom.dashboardSearchClear.addEventListener('click', () => {
+      if (dom.dashboardSearchInput) dom.dashboardSearchInput.value = '';
+      dashboardQuery = '';
+      renderDashboardQueue();
+      if (dom.dashboardSearchInput) dom.dashboardSearchInput.focus();
+    });
+  }
+  if (dom.dashboardFilters) {
+    dom.dashboardFilters.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-dl-status]');
+      if (!button) return;
+      dashboardStatusFilter = button.getAttribute('data-dl-status') || 'all';
+      renderDashboardQueue();
+    });
+  }
+  if (dom.dashboardCategories) {
+    dom.dashboardCategories.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-dl-category]');
+      if (!button) return;
+      const value = button.getAttribute('data-dl-category') || 'others';
+      dashboardCategory = dashboardCategory === value ? 'all' : value;
+      renderDashboardQueue();
+    });
+  }
+  if (dom.dashboardQueue) {
+    dom.dashboardQueue.addEventListener('click', (event) => {
+      const openButton = event.target.closest('[data-dashboard-open]');
+      if (openButton) {
+        openDownloadFile(Number(openButton.getAttribute('data-dashboard-open')));
+        return;
+      }
+      const removeButton = event.target.closest('[data-dashboard-remove]');
+      if (removeButton) {
+        removeDownloadFile(Number(removeButton.getAttribute('data-dashboard-remove'))).then(() => {
+          refreshDashboardDownloads();
+        });
+        return;
+      }
+      const resetButton = event.target.closest('[data-dashboard-reset]');
+      if (resetButton) {
+        dashboardStatusFilter = 'all';
+        dashboardCategory = 'all';
+        dashboardQuery = '';
+        if (dom.dashboardSearchInput) dom.dashboardSearchInput.value = '';
+        renderDashboardQueue();
+      }
+    });
+  }
+  if (dom.downloadFab) dom.downloadFab.addEventListener('click', openDownloadSheet);
+  if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
+  if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
+  if (dom.downloadPasteBtn) dom.downloadPasteBtn.addEventListener('click', pasteIntoDownloadInput);
   if (dom.dashboardMediaList) {
     dom.dashboardMediaList.addEventListener('click', (event) => {
       const button = event.target.closest('[data-media-download]');
@@ -3938,6 +4376,10 @@ function attachNativeListeners() {
       rebuildTabDownloadIndex();
     }
     if (overlays.has('downloads')) loadDownloads();
+    if (dashboardActive) {
+      renderDashboardQueue();
+      window.setTimeout(refreshDashboardDownloads, 900);
+    }
   });
 
   listen('downloadProgress', (data) => {
@@ -3950,6 +4392,7 @@ function attachNativeListeners() {
       rebuildTabDownloadIndex();
     }
     if (overlays.has('downloads')) updateDownloadProgress(data);
+    if (dashboardActive) updateDashboardProgress(data);
   });
 
   listen('downloadFinished', (data) => {
@@ -3962,6 +4405,7 @@ function attachNativeListeners() {
       rebuildTabDownloadIndex();
     }
     if (overlays.has('downloads')) loadDownloads();
+    if (dashboardActive) refreshDashboardDownloads();
   });
 }
 
@@ -3974,6 +4418,10 @@ function handleBack() {
   }
   if (overlays.has('choice')) {
     closeChoice();
+    return true;
+  }
+  if (overlays.has('downloadSheet')) {
+    closeDownloadSheet();
     return true;
   }
   if (overlays.has('downloads')) {

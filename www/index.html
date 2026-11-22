@@ -75,60 +75,84 @@
       </div>
 
       <!-- Download dashboard: the default home view -->
-      <section id="dashboardSection" class="dashboard-screen" aria-label="4Keeper dashboard">
+      <section id="dashboardSection" class="dashboard-screen" aria-label="4Keeper downloads">
         <div class="dashboard-inner">
-          <div class="dashboard-brand">
-            <span class="dashboard-mark" aria-hidden="true">4K</span>
-            <div class="dashboard-brand-text">
-              <h1 class="dashboard-title">4Keeper</h1>
-              <p class="dashboard-subtitle">Paste a link to sniff media, or search the web.</p>
+          <header class="dl-topbar">
+            <button id="dashboardMenuBtn" class="dl-icon-btn" type="button" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
+            <div class="dl-topbar-text">
+              <h1 class="dl-title">Downloads</h1>
+              <p id="dashboardStorage" class="dl-subtitle">Download manager</p>
             </div>
+            <div class="dl-topbar-actions">
+              <button id="dashboardSearchBtn" class="dl-icon-btn" type="button" aria-label="Search downloads" aria-expanded="false">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.7-3.7"/></svg>
+              </button>
+              <button id="dashboardGlobeBtn" class="dl-icon-btn" type="button" aria-label="Open browser">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9Z"/></svg>
+              </button>
+            </div>
+          </header>
+
+          <div id="dashboardSearch" class="dl-search hidden">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.7-3.7"/></svg>
+            <input id="dashboardSearchInput" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="Search downloads" aria-label="Search downloads" />
+            <button id="dashboardSearchClear" class="dl-search-clear" type="button" aria-label="Clear search">
+              <svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
           </div>
 
-          <form id="dashboardForm" class="dashboard-form" autocomplete="off">
-            <input
-              id="dashboardInput"
-              class="dashboard-input"
-              type="text"
-              inputmode="url"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              enterkeyhint="go"
-              placeholder="Paste link or search…"
-              aria-label="Paste a link or search"
-            />
-            <button class="dashboard-go" type="submit" aria-label="Open link">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-            </button>
-          </form>
+          <div id="dashboardFilters" class="dl-filters" role="tablist" aria-label="Filter downloads by status">
+            <button class="dl-filter is-active" type="button" role="tab" aria-selected="true" aria-controls="dashboardQueue" data-dl-status="all">All<span class="dl-count" data-dl-count="all">0</span></button>
+            <button class="dl-filter" type="button" role="tab" aria-selected="false" aria-controls="dashboardQueue" data-dl-status="downloading">Downloading<span class="dl-count" data-dl-count="downloading">0</span></button>
+            <button class="dl-filter" type="button" role="tab" aria-selected="false" aria-controls="dashboardQueue" data-dl-status="finished">Finished<span class="dl-count" data-dl-count="finished">0</span></button>
+            <button class="dl-filter" type="button" role="tab" aria-selected="false" aria-controls="dashboardQueue" data-dl-status="error">Error<span class="dl-count" data-dl-count="error">0</span></button>
+          </div>
 
-          <div class="dashboard-quick" role="group" aria-label="Quick actions">
-            <button id="dashboardBrowserBtn" class="dashboard-action" type="button">
-              <span class="dashboard-action-icon" aria-hidden="true">
-                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
-              </span>
-              <span class="dashboard-action-text">
-                <span class="dashboard-action-label">Open Browser</span>
-                <span class="dashboard-action-note">Continue to the web view</span>
-              </span>
-              <svg class="icon icon-sm dashboard-action-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+          <div id="dashboardCategories" class="dl-cats" role="group" aria-label="Filter downloads by file type">
+            <button class="dl-cat" type="button" data-dl-category="videos" aria-pressed="false">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2.5"/><path d="m15 10.5 6-3.5v10l-6-3.5Z"/></svg>
+              <span>Videos</span>
             </button>
-            <button id="dashboardDownloadsBtn" class="dashboard-action" type="button">
-              <span class="dashboard-action-icon" aria-hidden="true">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
-              </span>
-              <span class="dashboard-action-text">
-                <span class="dashboard-action-label">Downloads Manager</span>
-                <span class="dashboard-action-note">Files, progress and history</span>
-              </span>
-              <svg class="icon icon-sm dashboard-action-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+            <button class="dl-cat" type="button" data-dl-category="music" aria-pressed="false">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
+              <span>Music</span>
             </button>
+            <button class="dl-cat" type="button" data-dl-category="docs" aria-pressed="false">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+              <span>Docs</span>
+            </button>
+            <button class="dl-cat" type="button" data-dl-category="torrents" aria-pressed="false">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/><path d="M12 8v8m-3-3 3 3 3-3"/></svg>
+              <span>Torrents</span>
+            </button>
+            <button class="dl-cat" type="button" data-dl-category="others" aria-pressed="false">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+              <span>Others</span>
+            </button>
+          </div>
+
+          <div id="dashboardQueue" class="dl-queue" role="tabpanel" aria-live="polite" aria-label="Download queue">
+            <div class="dl-empty">
+              <div class="dl-ghost-list" aria-hidden="true">
+                <div class="dl-ghost"><span class="dl-ghost-icon"></span><span class="dl-ghost-lines"><span></span><span></span></span></div>
+                <div class="dl-ghost"><span class="dl-ghost-icon"></span><span class="dl-ghost-lines"><span></span><span></span></span></div>
+                <div class="dl-ghost"><span class="dl-ghost-icon"></span><span class="dl-ghost-lines"><span></span><span></span></span></div>
+              </div>
+              <div class="dl-empty-body">
+                <span class="dl-empty-icon" aria-hidden="true">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4Z"/></svg>
+                </span>
+                <div class="dl-empty-title">No active downloads</div>
+                <div class="dl-empty-text">Tap + to paste a link and start downloading.</div>
+              </div>
+            </div>
           </div>
 
           <section id="dashboardMedia" class="dashboard-media hidden" aria-live="polite" aria-labelledby="dashboardMediaTitle">
             <div class="dashboard-media-head">
-              <h2 id="dashboardMediaTitle" class="dashboard-media-title">Media Found on Page</h2>
+              <h2 id="dashboardMediaTitle" class="dashboard-media-title">Media found on page</h2>
               <span id="dashboardMediaCount" class="dashboard-media-count">0</span>
             </div>
             <div id="dashboardMediaList" class="dashboard-media-list"></div>
@@ -159,6 +183,49 @@
         <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.7" fill="currentColor" stroke="none"/></svg>
       </button>
     </nav>
+
+    <button id="downloadFab" class="dl-fab" type="button" aria-label="New download" aria-haspopup="dialog" aria-expanded="false">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+
+    <!-- New download sheet -->
+    <div id="downloadSheetBackdrop" class="backdrop"></div>
+    <section id="downloadSheet" class="sheet dl-sheet" role="dialog" aria-modal="true" aria-label="New download" aria-hidden="true">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2 class="sheet-title">New download</h2>
+        <div class="sheet-actions">
+          <button id="downloadSheetClose" class="icon-btn" type="button" aria-label="Close">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sheet-body flush dl-sheet-body">
+        <form id="dashboardForm" class="dl-form" autocomplete="off">
+          <div class="dl-input-wrap">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19"/></svg>
+            <input
+              id="dashboardInput"
+              class="dl-input"
+              type="text"
+              inputmode="url"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              enterkeyhint="go"
+              placeholder="Paste link or search…"
+              aria-label="Paste a link or search"
+            />
+            <button id="downloadPasteBtn" class="dl-paste" type="button" aria-label="Paste from clipboard">Paste</button>
+          </div>
+          <button class="dl-download-btn" type="submit">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
+            <span>Download</span>
+          </button>
+        </form>
+        <p class="dl-sheet-hint">Links download straight to your 4Keeper folder. Anything else opens as a web search.</p>
+      </div>
+    </section>
 
     <!-- Tab manager -->
     <div id="tabSheetBackdrop" class="backdrop"></div>

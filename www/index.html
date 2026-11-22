@@ -23,9 +23,9 @@
     })();
   </script>
 </head>
-<body>
+<body class="mode-dashboard">
   <div id="app" class="app">
-    <header id="toolbar" class="toolbar">
+    <header id="toolbar" class="toolbar hidden">
       <div class="toolbar-main">
         <button id="siteInfoBtn" class="icon-btn" type="button" aria-label="Site information">
           <span id="securityIcon"></span>
@@ -162,10 +162,10 @@
     </main>
 
     <nav id="bottomBar" class="bottom-bar" aria-label="Browser navigation">
-      <button id="backBtn" class="nav-btn" type="button" aria-label="Back" disabled>
+      <button id="backBtn" class="nav-btn hidden" type="button" aria-label="Back" disabled>
         <svg class="icon" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
       </button>
-      <button id="forwardBtn" class="nav-btn" type="button" aria-label="Forward" disabled>
+      <button id="forwardBtn" class="nav-btn hidden" type="button" aria-label="Forward" disabled>
         <svg class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
       </button>
       <button id="homeBtn" class="nav-btn" type="button" aria-label="Home">

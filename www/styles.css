@@ -1176,6 +1176,16 @@ select {
   border-top: 1px solid var(--border);
 }
 
+/* Dashboard mode has no browser chrome: the address bar is gone and only
+ * Home, Downloads, Tabs and Menu stay in the bottom bar. */
+body.mode-dashboard #toolbar {
+  display: none;
+}
+
+body.mode-dashboard .bottom-bar {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .nav-btn {
   position: relative;
   display: flex;

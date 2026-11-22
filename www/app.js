@@ -146,6 +146,8 @@ let appInfo = null;
 let downloadsCache = [];
 let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
 let downloadsFilter = 'all';
+let isDashboardMode = true;
+let booting = true;
 let dashboardActive = true;
 let dashboardStatusFilter = 'all';
 let dashboardCategory = 'all';
@@ -344,6 +346,20 @@ function isProbablyUrl(value) {
   if (/^localhost(:\d+)?([/?#]|$)/i.test(str)) return true;
   if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?([/?#]|$)/.test(str)) return true;
   return /^[^\s/?#]+\.[^\s/?#]{2,}([/?#].*)?$/i.test(str);
+}
+
+const DOWNLOAD_FILE_PATTERN = /\.(?:7z|aac|apk|avi|bin|bz2|docx?|epub|exe|flac|flv|gif|gz|img|iso|jpe?g|m4a|m4v|mkv|mov|mp3|mp4|mpeg|mpg|msi|ogg|opus|pdf|png|ppt|rar|rpm|tar|tgz|torrent|ts|txt|wav|webm|webp|wma|wmv|xlsx?|xz|zip)$/i;
+
+/* A URL that points straight at a file belongs to the download manager.
+ * Everything else is a page and opens in the browser. */
+function looksLikeDirectDownload(url) {
+  try {
+    const parsed = new URL(url);
+    if (DOWNLOAD_FILE_PATTERN.test(parsed.pathname)) return true;
+    return /(?:^|[?&])(?:download|dl|attachment)(?:=|&|$)/i.test(parsed.search);
+  } catch (error) {
+    return false;
+  }
 }
 
 function normalizeUrl(raw) {
@@ -903,13 +919,27 @@ function adoptNativeActiveTab(data) {
 function setNativeVisible(visible) {
   const plugin = getPlugin();
   if (!plugin) return;
-  const method = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
+  const preferred = visible ? plugin.showWebView : plugin.hideWebView;
+  const fallback = plugin.setVisibility || plugin.setWebViewVisibility || plugin.setVisible;
+  const method = typeof preferred === 'function' ? preferred : fallback;
   if (typeof method !== 'function') return;
   try {
     Promise.resolve(method.call(plugin, { visible })).catch(() => {});
   } catch (error) {
     /* ignore */
   }
+}
+
+/* Dashboard mode always hides the native WebView; browser mode brings it back
+ * only when the active tab actually holds a page. */
+function hideNativeWebView() {
+  nativeVisibleState = false;
+  setNativeVisible(false);
+}
+
+function showNativeWebView() {
+  nativeVisibleState = true;
+  setNativeVisible(true);
 }
 
 let uiOverlayState = null;
@@ -2123,8 +2153,10 @@ function setDashboardSearch(open) {
 
 function openBrowserFromDashboard() {
   const tab = activeTab();
+  setAppMode('browser');
   if (tab && isHttpUrl(tab.url)) {
-    leaveDashboard();
+    syncActiveTabUi();
+    syncNav();
     return;
   }
   navigate(getHomePage());
@@ -2201,33 +2233,61 @@ async function downloadDashboardMedia(index, button) {
   }
 }
 
+/* ------------------------------------------------------------ App modes */
+
+/* 4Keeper has two strictly separated modes.
+ *  - dashboard: the download manager. No address bar, no WebView, no
+ *    Back/Forward, only Home, Downloads, Tabs and Menu.
+ *  - browser: the address bar, the native WebView and the full bottom bar. */
+function setAppMode(mode) {
+  const next = mode === 'browser' ? 'browser' : 'dashboard';
+  isDashboardMode = next === 'dashboard';
+  dashboardActive = isDashboardMode;
+  const dashboard = isDashboardMode;
+
+  document.body.classList.toggle('mode-dashboard', dashboard);
+  document.body.classList.toggle('mode-browser', !dashboard);
+
+  /* display:none, so the toolbar cannot be tapped through or leave a strip. */
+  if (dom.toolbar) dom.toolbar.classList.toggle('hidden', dashboard);
+  if (dom.backBtn) dom.backBtn.classList.toggle('hidden', dashboard);
+  if (dom.forwardBtn) dom.forwardBtn.classList.toggle('hidden', dashboard);
+
+  if (dom.dashboardSection) {
+    dom.dashboardSection.classList.toggle('is-hidden', !dashboard);
+    dom.dashboardSection.setAttribute('aria-hidden', dashboard ? 'false' : 'true');
+  }
+  if (dom.downloadFab) dom.downloadFab.classList.toggle('is-off', !dashboard);
+
+  if (dashboard) {
+    hideNativeWebView();
+    renderDashboardMedia();
+    renderDashboardQueue();
+  } else {
+    const tab = activeTab();
+    if (tab && isHttpUrl(tab.url)) showNativeWebView();
+  }
+
+  syncNativeVisibility();
+  return isDashboardMode;
+}
+
 function showDashboard() {
-  dashboardActive = true;
+  setAppMode('dashboard');
   closeTabSheet();
   closeMenu();
   closeSiteInfo();
   closeDownloadSheet();
   hideSuggestions();
-  nativeVisibleState = false;
-  setNativeVisible(false);
-  if (dom.dashboardSection) {
-    dom.dashboardSection.classList.remove('is-hidden');
-    dom.dashboardSection.setAttribute('aria-hidden', 'false');
-  }
-  renderDashboardMedia();
-  renderDashboardQueue();
   syncNativeVisibility();
   refreshDashboardDownloads();
 }
 
 function leaveDashboard() {
-  if (!dashboardActive) return;
-  dashboardActive = false;
-  if (dom.dashboardSection) {
-    dom.dashboardSection.classList.add('is-hidden');
-    dom.dashboardSection.setAttribute('aria-hidden', 'true');
-  }
-  syncNativeVisibility();
+  /* The boot sequence restores tabs, which must not flip the launch mode. */
+  if (booting) return;
+  if (!isDashboardMode) return;
+  setAppMode('browser');
 }
 
 async function submitDashboardUrl() {
@@ -2247,7 +2307,18 @@ async function submitDashboardUrl() {
   else if (isProbablyUrl(raw) && !/^[a-z][a-z0-9+.-]*:/i.test(raw)) url = 'https://' + raw;
   if (!url) {
     closeDownloadSheet();
+    if (input) input.value = '';
+    setAppMode('browser');
     navigate(raw);
+    return;
+  }
+  /* A page address typed into the FAB leaves the dashboard and browses it.
+   * Only direct file links stay here as downloads. */
+  if (!looksLikeDirectDownload(url)) {
+    closeDownloadSheet();
+    if (input) input.value = '';
+    setAppMode('browser');
+    navigate(url);
     return;
   }
   if (dashboardBusy) return;
@@ -4462,6 +4533,9 @@ function handleBack() {
     callPlugin('toggleReadingMode', { enabled: false }).catch(() => {});
     return true;
   }
+  /* The dashboard has no page behind it, so Back must not steer the hidden
+   * WebView; let the host app handle it instead. */
+  if (isDashboardMode) return false;
   if (navCanBack) {
     goBack();
     return true;
@@ -4559,6 +4633,7 @@ async function boot() {
   await refreshTabs().catch(() => {});
   if (!tabs.length) await ensureTabExists();
   tabsReady = true;
+  booting = false;
   showDashboard();
   renderTabs();
   syncActiveTabUi();

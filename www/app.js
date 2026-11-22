@@ -141,6 +141,7 @@ let appInfo = null;
 let downloadsCache = [];
 let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
 let downloadsFilter = 'all';
+let dashboardActive = true;
 let tabMedia = {};
 let tabDownloadIndex = {};
 let mediaToastAt = 0;
@@ -184,6 +185,14 @@ const dom = {
   browserContainer: $('browserContainer'),
   webviewSnapshot: $('webviewSnapshot'),
   startScreen: $('startScreen'),
+  dashboardSection: $('dashboardSection'),
+  dashboardForm: $('dashboardForm'),
+  dashboardInput: $('dashboardInput'),
+  dashboardBrowserBtn: $('dashboardBrowserBtn'),
+  dashboardDownloadsBtn: $('dashboardDownloadsBtn'),
+  dashboardMedia: $('dashboardMedia'),
+  dashboardMediaList: $('dashboardMediaList'),
+  dashboardMediaCount: $('dashboardMediaCount'),
   backBtn: $('backBtn'),
   forwardBtn: $('forwardBtn'),
   homeBtn: $('homeBtn'),
@@ -928,21 +937,27 @@ function syncNativeVisibility() {
   const overlay = overlays.size > 0;
   const tab = activeTab();
   const hasPage = !!(tab && isHttpUrl(tab.url));
-  const pageBehind = overlay && hasPage;
+  const showPage = hasPage && !dashboardActive;
+  const pageBehind = overlay && showPage;
 
   document.body.classList.toggle('overlay-open', overlay);
+  document.body.classList.toggle('dashboard-open', dashboardActive);
 
-  if (nativeVisibleState !== hasPage) {
-    nativeVisibleState = hasPage;
-    setNativeVisible(hasPage);
+  if (nativeVisibleState !== showPage) {
+    nativeVisibleState = showPage;
+    setNativeVisible(showPage);
   }
   applyPageBehind(pageBehind);
 
-  dom.startScreen.classList.toggle('is-hidden', hasPage || overlay);
+  if (dom.dashboardSection) {
+    dom.dashboardSection.classList.toggle('is-hidden', !dashboardActive);
+    dom.dashboardSection.setAttribute('aria-hidden', dashboardActive ? 'false' : 'true');
+  }
+  dom.startScreen.classList.toggle('is-hidden', dashboardActive || hasPage || overlay);
 
-  if (!overlay) {
+  if (!overlay && !dashboardActive) {
     window.setTimeout(() => {
-      if (overlays.size === 0) mountBrowser();
+      if (overlays.size === 0 && !dashboardActive) mountBrowser();
     }, 80);
   }
 }
@@ -1546,6 +1561,7 @@ async function refreshTabMedia() {
   }
   updateDownloadsIndicator();
   if (overlays.has('tabs')) renderTabs();
+  if (dashboardActive) renderDashboardMedia();
 }
 
 function rebuildTabDownloadIndex() {
@@ -1684,6 +1700,7 @@ function renderTabs() {
 
 async function createTabWithUrl(url, activate) {
   await mountBrowser();
+  if (activate !== false) leaveDashboard();
   const target = buildHomeUrl(url || getHomePage());
   const shouldActivate = activate !== false;
   try {
@@ -1708,6 +1725,7 @@ async function navigate(raw) {
   const url = buildHomeUrl(normalizeUrl(raw));
   if (!url) return;
 
+  leaveDashboard();
   hideSuggestions();
   closeTabSheet();
   closeMenu();
@@ -1765,8 +1783,124 @@ async function goForward() {
   window.setTimeout(syncNav, 250);
 }
 
+/* ------------------------------------------------------------- Dashboard */
+
+function dashboardMediaItems() {
+  const items = [];
+  Object.keys(tabMedia).forEach((id) => {
+    const tabId = Number(id);
+    if (!Number.isFinite(tabId) || tabId < 0) return;
+    const entry = tabMedia[tabId];
+    if (!entry || typeof entry !== 'object') return;
+    const tab = tabs.find((candidate) => candidate && candidate.id === tabId) || null;
+    Object.keys(entry).forEach((url) => {
+      items.push({
+        url,
+        kind: entry[url] || 'video',
+        tabId,
+        pageTitle: (tab && tab.title) || '',
+        host: hostOf(url) || hostOf(tab && tab.url)
+      });
+    });
+  });
+  return items;
+}
+
+function renderDashboardMedia() {
+  if (!dom.dashboardMedia || !dom.dashboardMediaList) return;
+  const items = dashboardMediaItems();
+  if (dom.dashboardMediaCount) dom.dashboardMediaCount.textContent = String(items.length);
+  dom.dashboardMedia.classList.toggle('hidden', items.length === 0);
+  if (!items.length) {
+    dom.dashboardMediaList.innerHTML = '';
+    return;
+  }
+  dom.dashboardMediaList.innerHTML = items.map((item, index) => {
+    const isAudio = /audio/i.test(item.kind);
+    const label = isAudio ? 'AUDIO' : 'VIDEO';
+    return `
+      <div class="dashboard-media-item">
+        <span class="dashboard-media-badge" aria-hidden="true">${label}</span>
+        <div class="dashboard-media-meta">
+          <div class="dashboard-media-url" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div>
+          <div class="dashboard-media-host">${escapeHtml(item.host || 'Media file')}</div>
+        </div>
+        <button class="dashboard-media-download" type="button" data-media-download="${index}">Download</button>
+      </div>`;
+  }).join('');
+}
+
+async function downloadDashboardMedia(index, button) {
+  const item = dashboardMediaItems()[index];
+  if (!item) return;
+  const label = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Starting…';
+  }
+  try {
+    await callPlugin('downloadMedia', { url: item.url, tabId: item.tabId, kind: item.kind });
+    toast('Download started');
+  } catch (error) {
+    toast('Could not start this download');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = label || 'Download';
+    }
+  }
+}
+
+function showDashboard(options) {
+  dashboardActive = true;
+  closeTabSheet();
+  closeMenu();
+  closeSiteInfo();
+  hideSuggestions();
+  nativeVisibleState = false;
+  setNativeVisible(false);
+  if (dom.dashboardSection) {
+    dom.dashboardSection.classList.remove('is-hidden');
+    dom.dashboardSection.setAttribute('aria-hidden', 'false');
+  }
+  renderDashboardMedia();
+  syncNativeVisibility();
+  if (options && options.focus && dom.dashboardInput) {
+    window.setTimeout(() => dom.dashboardInput.focus(), 40);
+  }
+}
+
+function leaveDashboard() {
+  if (!dashboardActive) return;
+  dashboardActive = false;
+  if (dom.dashboardSection) {
+    dom.dashboardSection.classList.add('is-hidden');
+    dom.dashboardSection.setAttribute('aria-hidden', 'true');
+  }
+  syncNativeVisibility();
+}
+
+function submitDashboardUrl() {
+  const value = dom.dashboardInput ? dom.dashboardInput.value.trim() : '';
+  if (!value) {
+    if (dom.dashboardInput) dom.dashboardInput.focus();
+    return;
+  }
+  if (dom.dashboardInput) dom.dashboardInput.blur();
+  navigate(value);
+}
+
+function showBrowserView() {
+  const tab = activeTab();
+  if (!tab || !isHttpUrl(tab.url)) {
+    if (dom.dashboardInput) dom.dashboardInput.focus();
+    return;
+  }
+  leaveDashboard();
+}
+
 async function goHome() {
-  await navigate(getHomePage());
+  showDashboard({ focus: true });
 }
 
 async function newTab(url) {
@@ -1782,6 +1916,7 @@ async function switchTab(id) {
     toast('Could not switch tabs');
     return;
   }
+  leaveDashboard();
   closeTabSheet();
   closeMenu();
   await refreshTabs();
@@ -3308,6 +3443,39 @@ function attachUiListeners() {
   dom.backBtn.addEventListener('click', goBack);
   dom.forwardBtn.addEventListener('click', goForward);
   dom.homeBtn.addEventListener('click', goHome);
+
+  if (dom.dashboardForm) {
+    dom.dashboardForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitDashboardUrl();
+    });
+  }
+  if (dom.dashboardInput) {
+    dom.dashboardInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitDashboardUrl();
+      } else if (event.key === 'Escape') {
+        dom.dashboardInput.blur();
+      }
+    });
+  }
+  if (dom.dashboardBrowserBtn) {
+    dom.dashboardBrowserBtn.addEventListener('click', showBrowserView);
+  }
+  if (dom.dashboardDownloadsBtn) {
+    dom.dashboardDownloadsBtn.addEventListener('click', openDownloads);
+  }
+  if (dom.dashboardMediaList) {
+    dom.dashboardMediaList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-media-download]');
+      if (!button) return;
+      const index = Number(button.getAttribute('data-media-download'));
+      if (!Number.isFinite(index)) return;
+      downloadDashboardMedia(index, button);
+    });
+  }
+
   dom.downloadsBtn.addEventListener('click', () => {
     if (overlays.has('downloads')) closeDownloads();
     else openDownloads();
@@ -3735,7 +3903,11 @@ function attachNativeListeners() {
     if (!noteTabMedia(tabId, data.url, data.kind)) return;
     updateDownloadsIndicator();
     if (overlays.has('tabs')) renderTabs();
-    announceTabMedia(tabId);
+    if (dashboardActive) {
+      renderDashboardMedia();
+    } else if (!overlays.size && nativeVisibleState) {
+      announceTabMedia(tabId);
+    }
   });
 
   listen('mediaCleared', (data) => {
@@ -3745,6 +3917,7 @@ function attachNativeListeners() {
     dropTabMedia(tabId);
     updateDownloadsIndicator();
     if (overlays.has('tabs')) renderTabs();
+    if (dashboardActive) renderDashboardMedia();
   });
 
   listen('downloadStarted', (data) => {
@@ -3924,6 +4097,8 @@ async function boot() {
   updateMenuCounts();
 
   await mountBrowser(true);
+  nativeVisibleState = false;
+  setNativeVisible(false);
   await pushNativeSettings(false);
   loadAppInfo();
 
@@ -3936,6 +4111,7 @@ async function boot() {
   await refreshTabs().catch(() => {});
   if (!tabs.length) await ensureTabExists();
   tabsReady = true;
+  showDashboard();
   renderTabs();
   syncActiveTabUi();
   const tab = activeTab();

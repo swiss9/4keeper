@@ -73,6 +73,68 @@
         <div class="start-wordmark">4Keeper</div>
         <div class="start-hint">Fast, private, yours.</div>
       </div>
+
+      <!-- Download dashboard: the default home view -->
+      <section id="dashboardSection" class="dashboard-screen" aria-label="4Keeper dashboard">
+        <div class="dashboard-inner">
+          <div class="dashboard-brand">
+            <span class="dashboard-mark" aria-hidden="true">4K</span>
+            <div class="dashboard-brand-text">
+              <h1 class="dashboard-title">4Keeper</h1>
+              <p class="dashboard-subtitle">Paste a link to sniff media, or search the web.</p>
+            </div>
+          </div>
+
+          <form id="dashboardForm" class="dashboard-form" autocomplete="off">
+            <input
+              id="dashboardInput"
+              class="dashboard-input"
+              type="text"
+              inputmode="url"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              enterkeyhint="go"
+              placeholder="Paste link or search…"
+              aria-label="Paste a link or search"
+            />
+            <button class="dashboard-go" type="submit" aria-label="Open link">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+            </button>
+          </form>
+
+          <div class="dashboard-quick" role="group" aria-label="Quick actions">
+            <button id="dashboardBrowserBtn" class="dashboard-action" type="button">
+              <span class="dashboard-action-icon" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
+              </span>
+              <span class="dashboard-action-text">
+                <span class="dashboard-action-label">Open Browser</span>
+                <span class="dashboard-action-note">Continue to the web view</span>
+              </span>
+              <svg class="icon icon-sm dashboard-action-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+            </button>
+            <button id="dashboardDownloadsBtn" class="dashboard-action" type="button">
+              <span class="dashboard-action-icon" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
+              </span>
+              <span class="dashboard-action-text">
+                <span class="dashboard-action-label">Downloads Manager</span>
+                <span class="dashboard-action-note">Files, progress and history</span>
+              </span>
+              <svg class="icon icon-sm dashboard-action-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+            </button>
+          </div>
+
+          <section id="dashboardMedia" class="dashboard-media hidden" aria-live="polite" aria-labelledby="dashboardMediaTitle">
+            <div class="dashboard-media-head">
+              <h2 id="dashboardMediaTitle" class="dashboard-media-title">Media Found on Page</h2>
+              <span id="dashboardMediaCount" class="dashboard-media-count">0</span>
+            </div>
+            <div id="dashboardMediaList" class="dashboard-media-list"></div>
+          </section>
+        </div>
+      </section>
     </main>
 
     <nav id="bottomBar" class="bottom-bar" aria-label="Browser navigation">

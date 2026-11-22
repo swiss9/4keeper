@@ -1025,6 +1025,32 @@ public class EmbeddedWebViewPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Queue a direct download for a media URL that the sniffer surfaced on the
+     * dashboard. Uses the same pipeline as a WebView DownloadListener so the
+     * file lands in the configured download folder and shows up in the list.
+     */
+    @PluginMethod
+    public void downloadMedia(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url == null || url.trim().isEmpty()) {
+            call.reject("A media URL is required.");
+            return;
+        }
+        String mime = call.getString("mime", "");
+        String kind = call.getString("kind", "");
+        if ((mime == null || mime.isEmpty()) && kind != null) {
+            if (kind.equalsIgnoreCase("audio")) mime = "audio/*";
+            else if (kind.equalsIgnoreCase("video")) mime = "video/*";
+        }
+        Integer tabId = call.getInt("tabId");
+        int sourceTabId = (tabId != null && tabId >= 0) ? tabId : activeTabId;
+        final String targetUrl = url.trim();
+        final String targetMime = mime == null ? "" : mime;
+        getActivity().runOnUiThread(() -> enqueueDownload(targetUrl, null, null, targetMime, sourceTabId));
+        call.resolve();
+    }
+
     @PluginMethod
     public void setVisibility(PluginCall call) {
         boolean visible = call.getBoolean("visible", true);

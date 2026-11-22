@@ -2265,9 +2265,10 @@ async function downloadDashboardMedia(index, button) {
 /* ------------------------------------------------------------ App modes */
 
 /* 4Keeper has two strictly separated modes.
- *  - dashboard: the download manager. No address bar, no WebView, no
- *    Back/Forward, only Home, Downloads, Tabs and Menu.
- *  - browser: the address bar, the native WebView and the full bottom bar. */
+ *  - dashboard: the download manager. No address bar, no native WebView, no
+ *    bottom navigation and no browser side menu.
+ *  - browser: the address bar, the native WebView, the bottom navigation and
+ *    the browser side menu. */
 function setAppMode(mode) {
   const next = mode === 'browser' ? 'browser' : 'dashboard';
   isDashboardMode = next === 'dashboard';

@@ -82,8 +82,8 @@
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
             <div class="dl-topbar-text">
-              <h1 class="dl-title">Downloads</h1>
-              <p id="dashboardStorage" class="dl-subtitle">Download manager</p>
+              <h1 class="dl-title">4Keeper</h1>
+              <p id="dashboardStorage" class="dl-subtitle">Universal Media Downloader</p>
             </div>
             <div class="dl-topbar-actions">
               <button id="dashboardSearchBtn" class="dl-icon-btn" type="button" aria-label="Search downloads" aria-expanded="false">
@@ -161,6 +161,9 @@
       </section>
     </main>
 
+    <!-- Browser chrome: bottom navigation. Browser mode only; the wrapper is
+         display:none in dashboard mode so no browser chrome can bleed through. -->
+    <div id="browser-bottom-nav" class="browser-bottom-nav">
     <nav id="bottomBar" class="bottom-bar" aria-label="Browser navigation">
       <button id="backBtn" class="nav-btn hidden" type="button" aria-label="Back" disabled>
         <svg class="icon" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
@@ -168,7 +171,7 @@
       <button id="forwardBtn" class="nav-btn hidden" type="button" aria-label="Forward" disabled>
         <svg class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
       </button>
-      <button id="homeBtn" class="nav-btn" type="button" aria-label="Home">
+      <button id="home-btn" class="nav-btn" type="button" aria-label="Home">
         <svg class="icon" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7"/><path d="M5 9v12h14V9"/></svg>
       </button>
       <button id="downloadsBtn" class="nav-btn" type="button" aria-label="Downloads">
@@ -183,6 +186,7 @@
         <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.7" fill="currentColor" stroke="none"/></svg>
       </button>
     </nav>
+    </div>
 
     <button id="downloadFab" class="dl-fab" type="button" aria-label="New download" aria-haspopup="dialog" aria-expanded="false">
       <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -267,7 +271,8 @@
       </div>
     </section>
 
-    <!-- Menu -->
+    <!-- Browser side menu. Wrapped so dashboard mode can hide it completely. -->
+    <div id="browser-side-menu" class="browser-side-menu">
     <div id="menuBackdrop" class="backdrop"></div>
     <section id="menuSheet" class="sheet" role="dialog" aria-modal="true" aria-label="Menu" aria-hidden="true">
       <div class="sheet-handle"></div>
@@ -322,6 +327,7 @@
         </div>
       </div>
     </section>
+    </div>
 
     <!-- Site information -->
     <div id="siteInfoBackdrop" class="backdrop"></div>

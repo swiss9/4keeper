@@ -454,7 +454,7 @@ select {
 
 .dl-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;
@@ -1165,6 +1165,19 @@ select {
 
 /* ------------------------------------------------------------ Bottom bar */
 
+.browser-bottom-nav {
+  position: relative;
+  z-index: 60;
+  flex: 0 0 auto;
+  width: 100%;
+  display: none;
+  pointer-events: auto;
+}
+
+.browser-side-menu {
+  display: none;
+}
+
 .bottom-bar {
   position: relative;
   z-index: 45;
@@ -1174,16 +1187,24 @@ select {
   padding: 0 4px var(--safe-bottom);
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
+  pointer-events: auto;
 }
 
-/* Dashboard mode has no browser chrome: the address bar is gone and only
- * Home, Downloads, Tabs and Menu stay in the bottom bar. */
-body.mode-dashboard #toolbar {
-  display: none;
+/* Browser chrome lives in dedicated containers. Browser mode shows the URL bar,
+ * the bottom navigation and the side menu; dashboard mode hides all three so no
+ * browser UI can bleed through onto the dashboard. */
+body.mode-browser .browser-bottom-nav {
+  display: block;
 }
 
-body.mode-dashboard .bottom-bar {
-  grid-template-columns: repeat(4, 1fr);
+body.mode-browser .browser-side-menu {
+  display: block;
+}
+
+body.mode-dashboard #toolbar,
+body.mode-dashboard .browser-bottom-nav,
+body.mode-dashboard .browser-side-menu {
+  display: none !important;
 }
 
 .nav-btn {

@@ -218,6 +218,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private int boundsY = 0;
     private int boundsWidth = 0;
     private int boundsHeight = 0;
+    private int boundsReserveBottom = 0;
     private boolean boundsApplied = false;
     private boolean browserVisible = true;
 
@@ -347,9 +348,33 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     private FrameLayout.LayoutParams boundsParams() {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(boundsWidth), dp(boundsHeight));
-        params.leftMargin = dp(boundsX);
-        params.topMargin = dp(boundsY);
+        int width = Math.max(0, dp(boundsWidth));
+        int height = Math.max(0, dp(boundsHeight));
+        int left = Math.max(0, dp(boundsX));
+        int top = Math.max(0, dp(boundsY));
+        /* The page WebView must never reach into the strip reserved for the
+         * Capacitor shell's bottom navigation. The shell already measures its
+         * container above the nav; this clamp stops a stale measurement (for
+         * example one taken while the toolbar was hidden) from covering the nav
+         * and swallowing Home taps. */
+        FrameLayout root = rootView();
+        if (root != null) {
+            int rootHeight = root.getHeight();
+            int rootWidth = root.getWidth();
+            int reserved = Math.max(0, dp(boundsReserveBottom));
+            if (rootHeight > 0) {
+                int available = rootHeight - top - reserved;
+                if (available >= 0 && height > available) {
+                    height = available;
+                }
+            }
+            if (rootWidth > 0 && left + width > rootWidth) {
+                width = Math.max(0, rootWidth - left);
+            }
+        }
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
+        params.leftMargin = left;
+        params.topMargin = top;
         return params;
     }
 
@@ -840,17 +865,20 @@ public class EmbeddedWebViewPlugin extends Plugin {
         int y = call.getInt("y", 0);
         int width = call.getInt("width", 0);
         int height = call.getInt("height", 0);
+        int reserveBottom = call.getInt("reserveBottom", 0);
 
         getActivity().runOnUiThread(() -> {
             boolean unchanged = boundsApplied
                 && boundsX == x
                 && boundsY == y
                 && boundsWidth == width
-                && boundsHeight == height;
+                && boundsHeight == height
+                && boundsReserveBottom == reserveBottom;
             boundsX = x;
             boundsY = y;
             boundsWidth = width;
             boundsHeight = height;
+            boundsReserveBottom = reserveBottom;
             if (unchanged) {
                 call.resolve();
                 return;
@@ -859,8 +887,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
             for (Tab tab : tabs.values()) {
                 tab.view.setLayoutParams(boundsParams());
             }
+            /* Resolve only after the layout params are applied, so the shell can
+             * await mount() and know the page view no longer overlaps the nav. */
+            call.resolve();
         });
-        call.resolve();
     }
 
     @PluginMethod

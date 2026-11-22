@@ -221,7 +221,9 @@ const dom = {
   dashboardMediaCount: $('dashboardMediaCount'),
   backBtn: $('backBtn'),
   forwardBtn: $('forwardBtn'),
-  homeBtn: $('homeBtn'),
+  homeBtn: $('homeBtn') || $('home-btn'),
+  browserSideMenu: $('browser-side-menu'),
+  browserBottomNav: $('browser-bottom-nav'),
   tabsBtn: $('tabsBtn'),
   tabsBadge: $('tabsBadge'),
   downloadsBtn: $('downloadsBtn'),
@@ -937,9 +939,22 @@ function hideNativeWebView() {
   setNativeVisible(false);
 }
 
+/* Hard show/hide for a shell surface. An empty value falls back to the mode CSS
+ * so flex/grid layout is preserved for visible nodes. */
+function setNodeVisible(node, visible) {
+  if (!node) return;
+  node.style.display = visible ? '' : 'none';
+  if (visible) node.removeAttribute('aria-hidden');
+}
+
 function showNativeWebView() {
   nativeVisibleState = true;
-  setNativeVisible(true);
+  /* Apply fresh bounds before the page view is shown. Showing a page view that
+   * still carries stale (taller) metrics is what used to let it cover the shell's
+   * bottom navigation and swallow Home taps. */
+  mountBrowser().finally(() => {
+    if (nativeVisibleState === true && !dashboardActive) setNativeVisible(true);
+  });
 }
 
 let uiOverlayState = null;
@@ -1471,6 +1486,14 @@ async function resetBrowsingSession() {
 
 /* ------------------------------------------------------------------ Tabs */
 
+function browserChromeBottom() {
+  const nav = dom.browserBottomNav;
+  if (!nav) return 0;
+  const rect = nav.getBoundingClientRect();
+  if (!rect.height) return 0;
+  return Math.max(0, Math.round(window.innerHeight - rect.top));
+}
+
 async function mountBrowser(force) {
   const plugin = getPlugin();
   if (!plugin || typeof plugin.mount !== 'function') return;
@@ -1479,7 +1502,10 @@ async function mountBrowser(force) {
     x: Math.round(rect.left),
     y: Math.round(rect.top),
     width: Math.round(rect.width),
-    height: Math.round(rect.height)
+    height: Math.round(rect.height),
+    /* Hard clamp for the native layer: never let the page WebView reach into
+     * the strip reserved for the shell's bottom navigation. */
+    reserveBottom: browserChromeBottom()
   };
   const key = JSON.stringify(bounds);
   if (!force && key === lastBoundsKey) return;
@@ -2061,12 +2087,15 @@ function updateDashboardStorage() {
   if (!dom.dashboardStorage) return;
   const used = Number(downloadsUsage.usedBytes) || 0;
   const total = Number(downloadsUsage.totalBytes) || 0;
-  if (total > 0) {
-    dom.dashboardStorage.textContent = formatBytes(used) + ' of ' + formatBytes(total) + ' used';
-    return;
-  }
   const count = downloadsCache.length;
-  dom.dashboardStorage.textContent = count ? count + (count === 1 ? ' download' : ' downloads') : 'Download manager';
+  /* The header subtitle is fixed branding; storage usage stays available as the
+   * accessible label instead of replacing it. */
+  const detail = total > 0
+    ? formatBytes(used) + ' of ' + formatBytes(total) + ' used'
+    : (count ? count + (count === 1 ? ' download' : ' downloads') : '');
+  dom.dashboardStorage.textContent = 'Universal Media Downloader';
+  if (detail) dom.dashboardStorage.setAttribute('title', detail);
+  else dom.dashboardStorage.removeAttribute('title');
 }
 
 function syncDashboardFilters() {
@@ -2247,6 +2276,15 @@ function setAppMode(mode) {
 
   document.body.classList.toggle('mode-dashboard', dashboard);
   document.body.classList.toggle('mode-browser', !dashboard);
+  document.body.setAttribute('data-app-mode', next);
+
+  /* Strict DOM separation. Every browser-only surface is display:none on the
+   * dashboard, and the dashboard itself is display:none while browsing, so the
+   * two modes can never paint or receive taps at the same time. */
+  setNodeVisible(dom.toolbar, !dashboard);
+  setNodeVisible(dom.browserBottomNav, !dashboard);
+  setNodeVisible(dom.browserSideMenu, !dashboard);
+  setNodeVisible(dom.dashboardSection, dashboard);
 
   /* display:none, so the toolbar cannot be tapped through or leave a strip. */
   if (dom.toolbar) dom.toolbar.classList.toggle('hidden', dashboard);
@@ -2260,7 +2298,10 @@ function setAppMode(mode) {
   if (dom.downloadFab) dom.downloadFab.classList.toggle('is-off', !dashboard);
 
   if (dashboard) {
+    /* Drop the native page view first, before any dashboard pixel is painted. */
     hideNativeWebView();
+    if (overlays.has('menu')) closeMenu();
+    if (overlays.has('siteInfo')) closeSiteInfo();
     renderDashboardMedia();
     renderDashboardQueue();
   } else {
@@ -2344,6 +2385,9 @@ async function submitDashboardUrl() {
 }
 
 async function goHome() {
+  /* Hide the native page view first so it can never sit on top of the dashboard
+   * or keep receiving taps meant for the bottom navigation. */
+  hideNativeWebView();
   showDashboard();
 }
 
@@ -3886,7 +3930,15 @@ function attachUiListeners() {
 
   dom.backBtn.addEventListener('click', goBack);
   dom.forwardBtn.addEventListener('click', goForward);
-  dom.homeBtn.addEventListener('click', goHome);
+  /* Strict, id-based Home listener. It always drops the native page view before
+   * the dashboard is shown, so the user can never be trapped in browser mode. */
+  const homeButton = document.getElementById('home-btn') || document.getElementById('homeBtn');
+  if (homeButton) {
+    homeButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      goHome();
+    });
+  }
 
   if (dom.dashboardForm) {
     dom.dashboardForm.addEventListener('submit', (event) => {
@@ -3906,6 +3958,15 @@ function attachUiListeners() {
   }
   if (dom.dashboardMenuBtn) {
     dom.dashboardMenuBtn.addEventListener('click', openMenu);
+  }
+  if (dom.dashboardMenuBtn) {
+    /* The dashboard hamburger belongs to the dashboard: it opens App Settings and
+     * must never open the browser side menu. */
+    dom.dashboardMenuBtn.addEventListener('click', () => {
+      if (overlays.has('menu')) closeMenu();
+      dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
+      openSettingsScreen();
+    });
   }
   if (dom.dashboardGlobeBtn) {
     dom.dashboardGlobeBtn.addEventListener('click', openBrowserFromDashboard);
@@ -4254,7 +4315,7 @@ function attachUiListeners() {
     window.clearTimeout(boundsTimer);
     boundsTimer = window.setTimeout(() => {
       boundsTimer = null;
-      if (overlays.size === 0) mountBrowser();
+      if (overlays.size === 0 && !dashboardActive) mountBrowser();
     }, 90);
   };
   const handleResize = () => scheduleBoundsSync();
@@ -4264,7 +4325,9 @@ function attachUiListeners() {
 
   if (typeof ResizeObserver !== 'undefined') {
     const boundsObserver = new ResizeObserver(() => {
-      if (overlays.size === 0) mountBrowser();
+      /* Never mount the native page view while the dashboard owns the screen:
+       * a mount here would apply dashboard-sized (taller) bounds. */
+      if (overlays.size === 0 && !dashboardActive) mountBrowser();
     });
     boundsObserver.observe(dom.browserContainer);
   }

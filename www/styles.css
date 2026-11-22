@@ -474,6 +474,29 @@ select {
   text-overflow: ellipsis;
 }
 
+.dl-storage-bar {
+  position: relative;
+  width: 118px;
+  height: 3px;
+  margin: 6px 0 1px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.dl-storage-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-2);
+  transition: width 0.4s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+.dl-storage-bar.is-high .dl-storage-fill {
+  background: var(--danger);
+}
+
 .dl-topbar-actions {
   display: flex;
   align-items: center;
@@ -548,14 +571,113 @@ select {
 
 /* Status tabs --------------------------------------------------------- */
 
+.dl-filter-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 -14px;
+  border-bottom: 1px solid var(--border);
+}
+
 .dl-filters {
   display: flex;
+  flex: 1 1 auto;
   gap: 2px;
-  margin: 0 -14px;
-  padding: 0 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 2px 0 10px;
   overflow-x: auto;
   scrollbar-width: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.dl-sort-btn {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  margin: 0 4px 0 2px;
+  border-radius: 50%;
+  color: var(--muted);
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.dl-sort-btn:active,
+.dl-sort-btn[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Sort / options popover --------------------------------------------- */
+
+.dl-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 6px;
+  z-index: 25;
+  min-width: 218px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+}
+
+.dl-menu[hidden] {
+  display: none;
+}
+
+.dl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.dl-menu-item > span {
+  flex: 1 1 auto;
+}
+
+.dl-menu-item > .icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.dl-menu-item:active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.dl-menu-check {
+  opacity: 0;
+  color: var(--accent);
+}
+
+.dl-menu-item.is-selected {
+  color: var(--text);
+}
+
+.dl-menu-item.is-selected .dl-menu-check {
+  opacity: 1;
+}
+
+.dl-menu-item.is-danger,
+.dl-menu-item.is-danger > .icon {
+  color: var(--danger);
+}
+
+.dl-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 .dl-filters::-webkit-scrollbar {
@@ -733,6 +855,36 @@ select {
   color: var(--text);
 }
 
+.dl-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dl-row-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+.dl-row-dot {
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+
+.dl-row-type {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 .dl-row-meta {
   display: flex;
   align-items: center;
@@ -822,56 +974,26 @@ select {
   pointer-events: none;
 }
 
+.dl-row-btn.is-danger {
+  color: var(--danger);
+}
+
+.dl-row-btn.is-danger:active {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.dl-row[data-dl-group="error"] .dl-progress span {
+  background: var(--danger);
+}
+
 /* Empty queue --------------------------------------------------------- */
 
 .dl-empty {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-}
-
-.dl-ghost-list {
-  display: flex;
-  flex-direction: column;
-  opacity: 0.5;
-}
-
-.dl-ghost {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 11px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.dl-ghost-icon {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-s);
-  background: var(--surface-2);
-}
-
-.dl-ghost-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  flex: 1 1 auto;
-}
-
-.dl-ghost-lines span {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--surface-2);
-}
-
-.dl-ghost-lines span:first-child {
-  width: 56%;
-}
-
-.dl-ghost-lines span:last-child {
-  width: 32%;
-  opacity: 0.65;
+  min-height: 320px;
 }
 
 .dl-empty-body {
@@ -879,8 +1001,9 @@ select {
   flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 24px 24px 28px;
+  padding: 32px 24px 40px;
   text-align: center;
 }
 
@@ -1165,12 +1288,14 @@ select {
 
 /* ------------------------------------------------------------ Bottom bar */
 
+/* The bottom navigation is shared by both modes: the dashboard is the app's
+ * home screen, so it keeps the same four primary destinations as the browser. */
 .browser-bottom-nav {
   position: relative;
   z-index: 60;
   flex: 0 0 auto;
   width: 100%;
-  display: none;
+  display: block;
   pointer-events: auto;
 }
 
@@ -1183,7 +1308,7 @@ select {
   z-index: 45;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   padding: 0 4px var(--safe-bottom);
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
@@ -1202,7 +1327,6 @@ body.mode-browser .browser-side-menu {
 }
 
 body.mode-dashboard #toolbar,
-body.mode-dashboard .browser-bottom-nav,
 body.mode-dashboard .browser-side-menu {
   display: none !important;
 }
@@ -1225,6 +1349,26 @@ body.mode-dashboard .browser-side-menu {
 .nav-btn:active {
   color: var(--text);
   background: var(--accent-soft);
+}
+
+.nav-btn.is-active {
+  color: var(--accent);
+}
+
+.nav-btn.is-active::after {
+  content: "";
+  position: absolute;
+  bottom: 9px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+.nav-btn.is-active .icon {
+  stroke-width: 2.2;
 }
 
 .nav-btn:disabled {
@@ -2366,6 +2510,116 @@ label.setting-row:active,
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
+}
+
+/* ------------------------------------------------- Clipboard link prompt */
+
+.clipboard-prompt {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--bottom-h) + var(--safe-bottom) + 14px);
+  z-index: 190;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(14px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+}
+
+.clipboard-prompt.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.clipboard-prompt-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.clipboard-prompt-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.clipboard-prompt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.clipboard-prompt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.clipboard-prompt-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.clipboard-prompt-accept {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.clipboard-prompt-accept:active {
+  opacity: 0.78;
+}
+
+.clipboard-prompt-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--muted);
+}
+
+.clipboard-prompt-close:active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+@media (max-width: 360px) {
+  .clipboard-prompt {
+    left: 8px;
+    right: 8px;
+  }
+
+  .clipboard-prompt-accept {
+    padding: 0 10px;
+  }
 }
 
 /* ------------------------------------------------------------ Site info */

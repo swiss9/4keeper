@@ -107,6 +107,8 @@ const ICONS = {
   history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
   bookmark: '<path d="M6 3h12v18l-6-4.5L6 21Z"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/>',
+  pause: '<rect x="7" y="5" width="4" height="14" rx="1.2"/><rect x="13" y="5" width="4" height="14" rx="1.2"/>',
+  play: '<path d="M8 5.5v13l11-6.5Z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
   shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6Z"/>',
   palette: '<path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H13a2 2 0 0 1 0-4h4a3 3 0 0 0 3-3 7 7 0 0 0-8-7Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="9.5" cy="6.5" r="1"/><circle cx="14" cy="6.5" r="1"/>',
@@ -155,6 +157,13 @@ let dashboardQuery = '';
 let dashboardSearchOpen = false;
 let dashboardBusy = false;
 let dashboardRefreshToken = 0;
+let dashboardSort = 'date';
+let dashboardSortMenuOpen = false;
+let dashboardSpeeds = {};
+let clipboardPromptUrl = '';
+let clipboardLastPrompt = '';
+let clipboardLastPromptAt = 0;
+let clipboardCheckBusy = false;
 let tabMedia = {};
 let tabDownloadIndex = {};
 let mediaToastAt = 0;
@@ -209,8 +218,16 @@ const dom = {
   dashboardSearchClear: $('dashboardSearchClear'),
   dashboardGlobeBtn: $('dashboardGlobeBtn'),
   dashboardFilters: $('dashboardFilters'),
+  dashboardSortBtn: $('dashboardSortBtn'),
+  dashboardSortMenu: $('dashboardSortMenu'),
   dashboardCategories: $('dashboardCategories'),
   dashboardQueue: $('dashboardQueue'),
+  dashboardStorageBar: $('dashboardStorageBar'),
+  dashboardStorageFill: $('dashboardStorageFill'),
+  clipboardPrompt: $('clipboardPrompt'),
+  clipboardPromptUrl: $('clipboardPromptUrl'),
+  clipboardPromptAccept: $('clipboardPromptAccept'),
+  clipboardPromptClose: $('clipboardPromptClose'),
   downloadFab: $('downloadFab'),
   downloadSheet: $('downloadSheet'),
   downloadSheetBackdrop: $('downloadSheetBackdrop'),
@@ -219,14 +236,17 @@ const dom = {
   dashboardMedia: $('dashboardMedia'),
   dashboardMediaList: $('dashboardMediaList'),
   dashboardMediaCount: $('dashboardMediaCount'),
+  navDashboardBtn: $('navDashboardBtn'),
+  navBrowserBtn: $('navBrowserBtn'),
+  navSettingsBtn: $('navSettingsBtn'),
   backBtn: $('backBtn'),
   forwardBtn: $('forwardBtn'),
-  homeBtn: $('homeBtn') || $('home-btn'),
+  homeBtn: $('navDashboardBtn'),
   browserSideMenu: $('browser-side-menu'),
   browserBottomNav: $('browser-bottom-nav'),
   tabsBtn: $('tabsBtn'),
   tabsBadge: $('tabsBadge'),
-  downloadsBtn: $('downloadsBtn'),
+  downloadsBtn: $('navBrowserBtn'),
   downloadsMediaDot: $('downloadsMediaDot'),
   tabDownloadsBtn: $('tabDownloadsBtn'),
   tabDownloadsMediaDot: $('tabDownloadsMediaDot'),
@@ -807,8 +827,8 @@ function setSecurityIcon(url) {
 function setNav(canBack, canForward) {
   navCanBack = !!canBack;
   navCanForward = !!canForward;
-  dom.backBtn.disabled = !navCanBack;
-  dom.forwardBtn.disabled = !navCanForward;
+  if (dom.backBtn) dom.backBtn.disabled = !navCanBack;
+  if (dom.forwardBtn) dom.forwardBtn.disabled = !navCanForward;
 }
 
 function setLoading(isLoading) {
@@ -1166,7 +1186,7 @@ function openMenu() {
   dom.menuSheet.classList.add('open');
   dom.menuSheet.setAttribute('aria-hidden', 'false');
   dom.menuBackdrop.classList.add('open');
-  dom.menuBtn.setAttribute('aria-expanded', 'true');
+  if (dom.menuBtn) dom.menuBtn.setAttribute('aria-expanded', 'true');
   if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'true');
   closeOtherSheets('menu');
   updateMenuCounts();
@@ -1249,7 +1269,7 @@ function toggleReadingMode() {
 }
 
 function closeMenu() {
-  dom.menuBtn.setAttribute('aria-expanded', 'false');
+  if (dom.menuBtn) dom.menuBtn.setAttribute('aria-expanded', 'false');
   if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
   closeSheet('menu', dom.menuSheet, dom.menuBackdrop);
 }
@@ -1691,7 +1711,7 @@ function updateDownloadsIndicator() {
   const hasMedia = mediaCountForTab(activeTabId) > 0;
   if (dom.downloadsBtn) {
     dom.downloadsBtn.classList.toggle('has-media', hasMedia);
-    dom.downloadsBtn.setAttribute('aria-label', hasMedia ? 'Downloads, media available' : 'Downloads');
+    dom.downloadsBtn.setAttribute('aria-label', hasMedia ? 'Browser, media available' : 'Browser');
   }
   if (dom.downloadsMediaDot) dom.downloadsMediaDot.classList.toggle('hidden', !hasMedia);
   if (dom.tabDownloadsMediaDot) {
@@ -1966,14 +1986,52 @@ function dashboardPercent(item) {
   return Math.max(0, Math.min(100, Math.round((bytes / total) * 100)));
 }
 
+function dashboardSpeedFor(item) {
+  const entry = dashboardSpeeds[Number(item && item.id)];
+  return entry && Number(entry.speed) > 0 ? Number(entry.speed) : 0;
+}
+
+function formatSpeed(value) {
+  const speed = Number(value) || 0;
+  if (speed <= 0) return '';
+  return formatBytes(Math.round(speed)) + '/s';
+}
+
+/* Poll-to-poll throughput for running downloads. Android's download manager
+ * does not expose a rate, so the dashboard derives one from byte deltas. */
+function updateDashboardSpeeds() {
+  const now = Date.now();
+  const next = {};
+  downloadsCache.forEach((item) => {
+    const id = Number(item && item.id);
+    if (!Number.isFinite(id)) return;
+    const bytes = Number(item.bytes) || 0;
+    const previous = dashboardSpeeds[id];
+    const running = downloadStatusGroup(item) === 'downloading';
+    let speed = 0;
+    if (previous && running && now > previous.at) {
+      const delta = bytes - previous.bytes;
+      if (delta > 0) speed = delta / ((now - previous.at) / 1000);
+      else if (now - previous.at < 8000) speed = previous.speed || 0;
+    }
+    next[id] = { bytes, at: now, speed };
+  });
+  dashboardSpeeds = next;
+}
+
 function dashboardMetaText(item, group) {
   const bytes = Number(item.bytes) || 0;
   const total = Number(item.totalBytes) || 0;
   if (group === 'downloading') {
+    const speed = formatSpeed(dashboardSpeedFor(item));
+    const parts = [];
+    if (speed) parts.push(speed);
     if (total > 0) {
-      return dashboardPercent(item) + '% · ' + formatBytes(bytes) + ' of ' + formatBytes(total);
+      parts.push(dashboardPercent(item) + '% · ' + formatBytes(bytes) + ' of ' + formatBytes(total));
+    } else {
+      parts.push(bytes > 0 ? formatBytes(bytes) + ' downloaded' : 'Starting…');
     }
-    return bytes > 0 ? formatBytes(bytes) + ' downloaded' : 'Starting…';
+    return parts.join(' · ');
   }
   if (group === 'finished') {
     const size = total > 0 ? total : bytes;
@@ -2015,9 +2073,71 @@ function dashboardDownloadItems() {
     return true;
   });
   return items.sort((a, b) => {
+    if (dashboardSort === 'size') {
+      const sizeA = Number(a.totalBytes) || Number(a.bytes) || 0;
+      const sizeB = Number(b.totalBytes) || Number(b.bytes) || 0;
+      if (sizeB !== sizeA) return sizeB - sizeA;
+      return (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
+    }
     const rank = (DASHBOARD_STATUS_RANK[downloadStatusGroup(a)] || 0) - (DASHBOARD_STATUS_RANK[downloadStatusGroup(b)] || 0);
     if (rank) return rank;
     return (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
+  });
+}
+
+/* Sort / options ------------------------------------------------------- */
+
+function setDashboardSort(value) {
+  dashboardSort = value === 'size' ? 'size' : 'date';
+  syncDashboardSortMenu();
+  renderDashboardQueue();
+}
+
+function syncDashboardSortMenu() {
+  if (!dom.dashboardSortMenu) return;
+  dom.dashboardSortMenu.querySelectorAll('[data-dl-sort]').forEach((button) => {
+    const active = button.getAttribute('data-dl-sort') === dashboardSort;
+    button.classList.toggle('is-selected', active);
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
+}
+
+function setDashboardSortMenu(open) {
+  dashboardSortMenuOpen = !!open;
+  if (dom.dashboardSortBtn) {
+    dom.dashboardSortBtn.setAttribute('aria-expanded', dashboardSortMenuOpen ? 'true' : 'false');
+  }
+  if (!dom.dashboardSortMenu) return;
+  dom.dashboardSortMenu.hidden = !dashboardSortMenuOpen;
+  if (dashboardSortMenuOpen) syncDashboardSortMenu();
+}
+
+async function clearCompletedDownloads() {
+  setDashboardSortMenu(false);
+  const finished = downloadsCache.filter((item) => downloadStatusGroup(item) === 'finished');
+  if (!finished.length) {
+    toast('No completed downloads to clear');
+    return;
+  }
+  openDialog({
+    title: 'Clear completed downloads?',
+    message:
+      finished.length === 1
+        ? '1 finished download will be removed from the list and its file deleted.'
+        : finished.length + ' finished downloads will be removed from the list and their files deleted.',
+    confirmLabel: 'Clear',
+    destructive: true,
+    onConfirm: async () => {
+      for (const item of finished) {
+        try {
+          await callPlugin('removeDownload', { id: item.id });
+        } catch (error) {
+          /* keep clearing the rest */
+        }
+      }
+      await refreshDashboardDownloads();
+      toast('Completed downloads cleared');
+    }
   });
 }
 
@@ -2029,16 +2149,24 @@ function dashboardRowMarkup(item) {
   const canOpen = group === 'finished' && !missing;
   const dotClass = group === 'downloading' ? 'is-running' : group === 'finished' ? 'is-done' : group === 'error' ? 'is-error' : '';
   const meta = missing ? 'File removed' : dashboardMetaText(item, group);
-  const showProgress = group === 'downloading' && Number(item.totalBytes) > 0;
+  const host = hostOf(item.url) || 'Direct link';
+  const typeLabel = dashboardTypeLabel(item, category);
+  const showProgress = group !== 'finished' && Number(item.totalBytes) > 0;
+  const running = group === 'downloading';
+  const id = escapeHtml(item.id);
   return `
-    <div class="dl-row" data-download-id="${escapeHtml(item.id)}" data-dl-group="${group}">
+    <div class="dl-row" data-download-id="${id}" data-dl-group="${group}">
       <span class="dl-row-icon" aria-hidden="true">${svgIcon(DASHBOARD_CATEGORY_ICONS[category] || 'file', 'icon icon-sm')}</span>
       <div class="dl-row-main">
         <div class="dl-row-name" title="${escapeHtml(item.filename || 'Download')}">${escapeHtml(item.filename || 'Download')}</div>
+        <div class="dl-row-sub">
+          <span class="dl-row-host" title="${escapeHtml(item.url || '')}">${escapeHtml(host)}</span>
+          <span class="dl-row-dot" aria-hidden="true">·</span>
+          <span class="dl-row-type">${escapeHtml(typeLabel)}</span>
+        </div>
         <div class="dl-row-meta">
           <span class="dl-status-dot ${dotClass}" aria-hidden="true"></span>
           <span data-dl-meta>${escapeHtml(meta)}</span>
-          <span>· ${escapeHtml(dashboardTypeLabel(item, category))}</span>
         </div>
         ${
           showProgress
@@ -2047,12 +2175,13 @@ function dashboardRowMarkup(item) {
         }
       </div>
       <div class="dl-row-actions">
-        <button class="dl-row-btn" type="button" data-dashboard-open="${escapeHtml(item.id)}" aria-label="Open download"${canOpen ? '' : ' disabled'}>
-          ${svgIcon('external', 'icon icon-xs')}
-        </button>
-        <button class="dl-row-btn" type="button" data-dashboard-remove="${escapeHtml(item.id)}" aria-label="Remove download">
-          ${svgIcon('trash', 'icon icon-xs')}
-        </button>
+        ${
+          running
+            ? `<button class="dl-row-btn" type="button" data-dashboard-pause="${id}" aria-label="Pause download" aria-pressed="false">${svgIcon('pause', 'icon icon-xs')}</button>
+               <button class="dl-row-btn is-danger" type="button" data-dashboard-cancel="${id}" aria-label="Cancel download">${svgIcon('close', 'icon icon-xs')}</button>`
+            : `<button class="dl-row-btn" type="button" data-dashboard-open="${id}" aria-label="Open download"${canOpen ? '' : ' disabled'}>${svgIcon('external', 'icon icon-xs')}</button>
+               <button class="dl-row-btn" type="button" data-dashboard-remove="${id}" aria-label="Remove download">${svgIcon('trash', 'icon icon-xs')}</button>`
+        }
       </div>
     </div>`;
 }
@@ -2070,11 +2199,8 @@ function dashboardEmptyMarkup() {
         </div>
       </div>`;
   }
-  const ghost =
-    '<div class="dl-ghost"><span class="dl-ghost-icon"></span><span class="dl-ghost-lines"><span></span><span></span></span></div>';
   return `
     <div class="dl-empty">
-      <div class="dl-ghost-list" aria-hidden="true">${ghost.repeat(3)}</div>
       <div class="dl-empty-body">
         <span class="dl-empty-icon" aria-hidden="true">${svgIcon('inbox', 'icon')}</span>
         <div class="dl-empty-title">No active downloads</div>
@@ -2084,18 +2210,22 @@ function dashboardEmptyMarkup() {
 }
 
 function updateDashboardStorage() {
-  if (!dom.dashboardStorage) return;
   const used = Number(downloadsUsage.usedBytes) || 0;
   const total = Number(downloadsUsage.totalBytes) || 0;
   const count = downloadsCache.length;
-  /* The header subtitle is fixed branding; storage usage stays available as the
-   * accessible label instead of replacing it. */
-  const detail = total > 0
-    ? formatBytes(used) + ' of ' + formatBytes(total) + ' used'
-    : (count ? count + (count === 1 ? ' download' : ' downloads') : '');
-  dom.dashboardStorage.textContent = 'Universal Media Downloader';
-  if (detail) dom.dashboardStorage.setAttribute('title', detail);
-  else dom.dashboardStorage.removeAttribute('title');
+  const percent = total > 0 ? Math.max(0, Math.min(100, (used / total) * 100)) : 0;
+  if (dom.dashboardStorage) {
+    const detail = total > 0
+      ? formatBytes(used) + ' of ' + formatBytes(total) + ' used'
+      : (count ? count + (count === 1 ? ' download' : ' downloads') : 'Universal Media Downloader');
+    dom.dashboardStorage.textContent = detail;
+    dom.dashboardStorage.setAttribute('title', detail);
+  }
+  if (dom.dashboardStorageBar) {
+    dom.dashboardStorageBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    dom.dashboardStorageBar.classList.toggle('is-high', percent >= 90);
+  }
+  if (dom.dashboardStorageFill) dom.dashboardStorageFill.style.width = percent.toFixed(1) + '%';
 }
 
 function syncDashboardFilters() {
@@ -2241,6 +2371,94 @@ async function pasteIntoDownloadInput() {
   }
 }
 
+/* ------------------------------------------------------- Clipboard links */
+
+const CLIPBOARD_PROMPT_GAP = 45000;
+
+async function readClipboardText() {
+  /* Native read first: the WebView clipboard API needs a focused document and
+   * can silently reject right after the app comes back to the foreground. */
+  const plugin = getPlugin();
+  if (plugin && typeof plugin.readClipboard === 'function') {
+    try {
+      const result = await plugin.readClipboard();
+      const text = result && typeof result.text === 'string' ? result.text : '';
+      if (text) return text;
+    } catch (error) {
+      /* fall through to the web API */
+    }
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch (error) {
+    return '';
+  }
+}
+
+function normalizeClipboardUrl(value) {
+  const text = String(value || '').trim();
+  if (!text || /\s/.test(text)) return '';
+  if (isHttpUrl(text)) return text;
+  if (/^magnet:/i.test(text)) return '';
+  if (isProbablyUrl(text) && !/^[a-z][a-z0-9+.-]*:/i.test(text)) return 'https://' + text;
+  return '';
+}
+
+function hideClipboardPrompt() {
+  if (!dom.clipboardPrompt) return;
+  dom.clipboardPrompt.classList.remove('show');
+  dom.clipboardPrompt.setAttribute('aria-hidden', 'true');
+  clipboardPromptUrl = '';
+}
+
+function showClipboardPrompt(url) {
+  if (!dom.clipboardPrompt || !url) return;
+  clipboardPromptUrl = url;
+  if (dom.clipboardPromptUrl) dom.clipboardPromptUrl.textContent = url;
+  dom.clipboardPrompt.classList.add('show');
+  dom.clipboardPrompt.setAttribute('aria-hidden', 'false');
+}
+
+function acceptClipboardPrompt() {
+  const url = clipboardPromptUrl;
+  hideClipboardPrompt();
+  if (!url) return;
+  openDownloadSheet();
+  if (!dom.dashboardInput) return;
+  dom.dashboardInput.value = url;
+  window.setTimeout(() => {
+    if (!dom.dashboardInput) return;
+    dom.dashboardInput.focus();
+    try {
+      const end = dom.dashboardInput.value.length;
+      dom.dashboardInput.setSelectionRange(end, end);
+    } catch (error) {
+      /* ignore */
+    }
+  }, 200);
+}
+
+async function checkClipboardForLink() {
+  if (clipboardCheckBusy || booting) return;
+  if (!isDashboardMode || !dashboardActive) return;
+  if (overlays.size > 0) return;
+  if (clipboardPromptUrl) return;
+  clipboardCheckBusy = true;
+  try {
+    const raw = await readClipboardText();
+    const url = normalizeClipboardUrl(raw);
+    if (!url) return;
+    if (!isDashboardMode || !dashboardActive || overlays.size > 0) return;
+    const now = Date.now();
+    if (url === clipboardLastPrompt && now - clipboardLastPromptAt < CLIPBOARD_PROMPT_GAP) return;
+    clipboardLastPrompt = url;
+    clipboardLastPromptAt = now;
+    showClipboardPrompt(url);
+  } finally {
+    clipboardCheckBusy = false;
+  }
+}
+
 async function downloadDashboardMedia(index, button) {
   const item = dashboardMediaItems()[index];
   if (!item) return;
@@ -2269,6 +2487,26 @@ async function downloadDashboardMedia(index, button) {
  *    bottom navigation and no browser side menu.
  *  - browser: the address bar, the native WebView, the bottom navigation and
  *    the browser side menu. */
+function setBottomNavActive(target) {
+  const buttons = {
+    dashboard: dom.navDashboardBtn,
+    browser: dom.navBrowserBtn,
+    settings: dom.navSettingsBtn
+  };
+  Object.keys(buttons).forEach((key) => {
+    const button = buttons[key];
+    if (!button) return;
+    const active = key === target;
+    button.classList.toggle('is-active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+
+function syncBottomNav(dashboard) {
+  setBottomNavActive(dashboard ? 'dashboard' : 'browser');
+}
+
 function setAppMode(mode) {
   const next = mode === 'browser' ? 'browser' : 'dashboard';
   isDashboardMode = next === 'dashboard';
@@ -2283,9 +2521,13 @@ function setAppMode(mode) {
    * dashboard, and the dashboard itself is display:none while browsing, so the
    * two modes can never paint or receive taps at the same time. */
   setNodeVisible(dom.toolbar, !dashboard);
-  setNodeVisible(dom.browserBottomNav, !dashboard);
+  /* The bottom navigation belongs to the whole app now: the dashboard is the
+   * home screen, so the same four destinations stay reachable in both modes. */
+  setNodeVisible(dom.browserBottomNav, true);
   setNodeVisible(dom.browserSideMenu, !dashboard);
   setNodeVisible(dom.dashboardSection, dashboard);
+  syncBottomNav(dashboard);
+  if (!dashboard) hideClipboardPrompt();
 
   /* display:none, so the toolbar cannot be tapped through or leave a strip. */
   if (dom.toolbar) dom.toolbar.classList.toggle('hidden', dashboard);
@@ -3375,6 +3617,7 @@ async function fetchDownloads() {
     downloadsCache = [];
     downloadsUsage = { usedBytes: 0, totalBytes: 0 };
   }
+  updateDashboardSpeeds();
   rebuildTabDownloadIndex();
   return downloadsCache;
 }
@@ -3424,6 +3667,40 @@ async function removeDownloadFile(id) {
     return;
   }
   loadDownloads();
+}
+
+/* Android's DownloadManager has no pause API; if a future plugin version
+ * exposes pauseDownload the button uses it, otherwise it says so instead of
+ * faking a paused state. */
+async function togglePauseDownload(id, button) {
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.pauseDownload !== 'function') {
+    toast("Pause isn't supported by Android's download manager");
+    return;
+  }
+  const paused = button && button.getAttribute('aria-pressed') === 'true';
+  try {
+    await callPlugin('pauseDownload', { id, paused: !paused });
+    if (button) button.setAttribute('aria-pressed', paused ? 'false' : 'true');
+    toast(paused ? 'Download resumed' : 'Download paused');
+    refreshDashboardDownloads();
+  } catch (error) {
+    toast(paused ? 'Could not resume this download' : 'Could not pause this download');
+  }
+}
+
+function cancelDashboardDownload(id) {
+  openDialog({
+    title: 'Cancel download?',
+    message: 'The partial file will be deleted.',
+    confirmLabel: 'Cancel download',
+    cancelLabel: 'Keep',
+    destructive: true,
+    onConfirm: async () => {
+      await removeDownloadFile(id);
+      await refreshDashboardDownloads();
+    }
+  });
 }
 
 /* ------------------------------------------------------------- Site info */
@@ -3642,7 +3919,11 @@ function settingsPageDownloads() {
 }
 
 function settingsPageData() {
-  return settingSection('Browsing data', `
+  return settingSection('Library', `
+      ${settingRowAction('history', 'History', 'Pages you have visited', 'openHistory')}
+      ${settingRowAction('bookmark', 'Bookmarks', 'Pages you saved', 'openBookmarks')}
+    `) +
+    settingSection('Browsing data', `
       ${settingRowAction('trash', 'Clear browsing data', 'History, cookies, cache and site data', 'clearData', true)}
     `) +
     `<div class="setting-note">Settings, bookmarks and downloads are not removed by clearing browsing data.</div>`;
@@ -3697,7 +3978,7 @@ function showSettingsSection(section) {
     privacy: 'Privacy and security',
     site: 'Site settings',
     downloads: 'Downloads',
-    data: 'Delete browsing data',
+    data: 'Data',
     about: 'About 4Keeper'
   })[section] || 'Settings';
   dom.settingsPage.scrollTop = 0;
@@ -3714,6 +3995,7 @@ function openSettingsScreen(section) {
   if (section) showSettingsSection(section);
   else renderSettingsRoot();
   openScreen('settings', dom.settingsScreen);
+  setBottomNavActive('settings');
   closeMenu();
 }
 
@@ -3723,6 +4005,7 @@ function closeSettingsScreen() {
     return;
   }
   closeScreen('settings', dom.settingsScreen);
+  setBottomNavActive(isDashboardMode ? 'dashboard' : 'browser');
 }
 
 function handleSettingsAction(action) {
@@ -3809,6 +4092,12 @@ function handleSettingsAction(action) {
       break;
     case 'openDownloads':
       openDownloads();
+      break;
+    case 'openHistory':
+      openHistory();
+      break;
+    case 'openBookmarks':
+      openBookmarks();
       break;
     case 'downloadFolder':
       openChoice('Download location', [
@@ -3929,13 +4218,13 @@ function attachUiListeners() {
     }
   });
 
-  dom.backBtn.addEventListener('click', goBack);
-  dom.forwardBtn.addEventListener('click', goForward);
-  /* Strict, id-based Home listener. It always drops the native page view before
-   * the dashboard is shown, so the user can never be trapped in browser mode. */
-  const homeButton = document.getElementById('home-btn') || document.getElementById('homeBtn');
-  if (homeButton) {
-    homeButton.addEventListener('click', (event) => {
+  if (dom.backBtn) dom.backBtn.addEventListener('click', goBack);
+  if (dom.forwardBtn) dom.forwardBtn.addEventListener('click', goForward);
+  /* Strict, id-based Dashboard listener. It always drops the native page view
+   * before the dashboard is shown, so the user can never be trapped in browser
+   * mode. The dashboard is the app's home screen. */
+  if (dom.navDashboardBtn) {
+    dom.navDashboardBtn.addEventListener('click', (event) => {
       event.preventDefault();
       goHome();
     });
@@ -4016,6 +4305,16 @@ function attachUiListeners() {
         openDownloadFile(Number(openButton.getAttribute('data-dashboard-open')));
         return;
       }
+      const pauseButton = event.target.closest('[data-dashboard-pause]');
+      if (pauseButton) {
+        togglePauseDownload(Number(pauseButton.getAttribute('data-dashboard-pause')), pauseButton);
+        return;
+      }
+      const cancelButton = event.target.closest('[data-dashboard-cancel]');
+      if (cancelButton) {
+        cancelDashboardDownload(Number(cancelButton.getAttribute('data-dashboard-cancel')));
+        return;
+      }
       const removeButton = event.target.closest('[data-dashboard-remove]');
       if (removeButton) {
         removeDownloadFile(Number(removeButton.getAttribute('data-dashboard-remove'))).then(() => {
@@ -4033,6 +4332,32 @@ function attachUiListeners() {
       }
     });
   }
+  if (dom.dashboardSortBtn) {
+    dom.dashboardSortBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setDashboardSortMenu(!dashboardSortMenuOpen);
+    });
+  }
+  if (dom.dashboardSortMenu) {
+    dom.dashboardSortMenu.addEventListener('click', (event) => {
+      const sortButton = event.target.closest('[data-dl-sort]');
+      if (sortButton) {
+        setDashboardSort(sortButton.getAttribute('data-dl-sort'));
+        setDashboardSortMenu(false);
+        return;
+      }
+      if (event.target.closest('[data-dl-clear-completed]')) clearCompletedDownloads();
+    });
+  }
+  document.addEventListener('pointerdown', (event) => {
+    if (!dashboardSortMenuOpen) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#dashboardSortMenu') || target.closest('#dashboardSortBtn')) return;
+    setDashboardSortMenu(false);
+  }, true);
+  if (dom.clipboardPromptAccept) dom.clipboardPromptAccept.addEventListener('click', acceptClipboardPrompt);
+  if (dom.clipboardPromptClose) dom.clipboardPromptClose.addEventListener('click', hideClipboardPrompt);
   if (dom.downloadFab) dom.downloadFab.addEventListener('click', openDownloadSheet);
   if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
   if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
@@ -4047,19 +4372,18 @@ function attachUiListeners() {
     });
   }
 
-  dom.downloadsBtn.addEventListener('click', () => {
-    if (overlays.has('downloads')) closeDownloads();
-    else openDownloads();
-  });
-  dom.tabsBtn.addEventListener('click', () => {
-    if (overlays.has('tabs')) closeTabSheet();
-    else openTabSheet();
-  });
-  dom.menuBtn.addEventListener('click', () => {
-    if (overlays.has('menu')) closeMenu();
-    else openMenu();
-  });
-  dom.siteInfoBtn.addEventListener('click', openSiteInfo);
+  if (dom.navBrowserBtn) {
+    dom.navBrowserBtn.addEventListener('click', openBrowserFromDashboard);
+  }
+  if (dom.navSettingsBtn) {
+    dom.navSettingsBtn.addEventListener('click', () => openSettingsScreen());
+  }
+  if (dom.tabsBtn) {
+    dom.tabsBtn.addEventListener('click', () => {
+      if (overlays.has('tabs')) closeTabSheet();
+      else openTabSheet();
+    });
+  }  dom.siteInfoBtn.addEventListener('click', openSiteInfo);
 
   dom.suggestionsList.addEventListener('pointerdown', (event) => event.preventDefault());
   dom.suggestionsList.addEventListener('click', (event) => {
@@ -4716,6 +5040,7 @@ async function boot() {
     App.addListener('appStateChange', (state) => {
       if (!state || state.isActive === false) {
         saveSession();
+        hideClipboardPrompt();
         return;
       }
       lastBoundsKey = '';
@@ -4726,8 +5051,15 @@ async function boot() {
       window.setTimeout(() => {
         if (overlays.size === 0) mountBrowser(true);
       }, 160);
+      /* Give Android a moment to finish the resume transition before touching
+       * the clipboard, otherwise the read can be denied as background access. */
+      window.setTimeout(checkClipboardForLink, 450);
     });
   }
+
+  document.addEventListener('resume', () => {
+    window.setTimeout(checkClipboardForLink, 300);
+  });
 
   window.addEventListener('pagehide', saveSession);
   document.addEventListener('visibilitychange', () => {
@@ -4740,6 +5072,7 @@ async function boot() {
       window.setTimeout(() => {
         if (overlays.size === 0) mountBrowser();
       }, 160);
+      window.setTimeout(checkClipboardForLink, 300);
     }
   });
 }

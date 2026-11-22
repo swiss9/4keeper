@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -1895,6 +1897,25 @@ public class EmbeddedWebViewPlugin extends Plugin {
             default:
                 return "unknown";
         }
+    }
+
+    @PluginMethod
+    public void readClipboard(PluginCall call) {
+        String text = "";
+        try {
+            ClipboardManager manager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            if (manager != null && manager.hasPrimaryClip()) {
+                ClipData clip = manager.getPrimaryClip();
+                if (clip != null && clip.getItemCount() > 0) {
+                    CharSequence value = clip.getItemAt(0).coerceToText(getContext());
+                    if (value != null) text = value.toString();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        JSObject result = new JSObject();
+        result.put("text", text);
+        call.resolve(result);
     }
 
     @PluginMethod

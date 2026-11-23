@@ -78,6 +78,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -351,8 +352,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean popupsEnabled = true;
     private boolean safeBrowsingEnabled = true;
     private boolean trackingProtectionEnabled = false;
-    private boolean adBlockEnabled = false;
-    private boolean fingerprintBlockEnabled = false;
+    private boolean adBlockEnabled = true;
+    private boolean fingerprintBlockEnabled = true;
     private boolean desktopMode = false;
     private boolean pinchZoomEnabled = true;
     private boolean zoomControlsVisible = false;
@@ -360,6 +361,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean autoOpenPdf = false;
     private boolean autoOpenDownload = false;
     private boolean parallelDownloads = true;
+    private int connectionsPerFile = 4;
     private boolean askDownloadLocation = false;
     private String downloadLocation = "";
     private int textZoom = 100;
@@ -373,6 +375,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private ExecutorService downloadExecutor;
     private final Object serialDownloadLock = new Object();
     private final Object downloadRecordLock = new Object();
+    /* Downloads currently served by the multi-threaded engine, so a cancel
+     * from the downloads list can stop the worker threads. */
+    private final Map<Long, MultiThreadDownloader> activeDownloaders = new ConcurrentHashMap<>();
     private ActivityResultLauncher<String> createDocumentLauncher;
     private PendingDownload pendingDownload;
     private BroadcastReceiver downloadReceiver;
@@ -408,8 +413,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         popupsEnabled = prefs.getBoolean("popupsEnabled", true);
         safeBrowsingEnabled = prefs.getBoolean("safeBrowsingEnabled", true);
         trackingProtectionEnabled = prefs.getBoolean("trackingProtectionEnabled", false);
-        adBlockEnabled = prefs.getBoolean("adBlockEnabled", false);
-        fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", false);
+        adBlockEnabled = prefs.getBoolean("adBlockEnabled", true);
+        fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", true);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
         zoomControlsVisible = prefs.getBoolean("zoomControlsVisible", false);
@@ -417,6 +422,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         autoOpenPdf = prefs.getBoolean("autoOpenPdf", false);
         autoOpenDownload = prefs.getBoolean("autoOpenDownload", false);
         parallelDownloads = prefs.getBoolean("parallelDownloads", true);
+        connectionsPerFile = MultiThreadDownloader.normalizeConnections(prefs.getInt("connectionsPerFile", 4));
         askDownloadLocation = prefs.getBoolean("askDownloadLocation", false);
         downloadLocation = prefs.getString("downloadLocation", "");
         textZoom = prefs.getInt("textZoom", 100);
@@ -472,6 +478,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("autoOpenPdf", autoOpenPdf)
             .putBoolean("autoOpenDownload", autoOpenDownload)
             .putBoolean("parallelDownloads", parallelDownloads)
+            .putInt("connectionsPerFile", connectionsPerFile)
             .putBoolean("askDownloadLocation", askDownloadLocation)
             .putString("downloadLocation", downloadLocation)
             .putInt("textZoom", textZoom)
@@ -1448,14 +1455,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("safeBrowsing")) safeBrowsingEnabled = data.optBoolean("safeBrowsing", true);
         if (data.has("darkMode")) webDarkMode = data.optBoolean("darkMode", false);
         if (data.has("trackingProtection")) trackingProtectionEnabled = data.optBoolean("trackingProtection", false);
-        if (data.has("isAdBlockEnabled")) adBlockEnabled = data.optBoolean("isAdBlockEnabled", false);
-        if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", false);
+        if (data.has("isAdBlockEnabled")) adBlockEnabled = data.optBoolean("isAdBlockEnabled", true);
+        if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", true);
         if (data.has("zoomControls")) zoomControlsVisible = data.optBoolean("zoomControls", false);
         if (data.has("pinchZoom")) pinchZoomEnabled = data.optBoolean("pinchZoom", true);
         if (data.has("downloadNotifications")) downloadNotifications = data.optBoolean("downloadNotifications", true);
         if (data.has("autoOpenPdf")) autoOpenPdf = data.optBoolean("autoOpenPdf", false);
         if (data.has("autoOpenDownload")) autoOpenDownload = data.optBoolean("autoOpenDownload", false);
         if (data.has("parallelDownloads")) parallelDownloads = data.optBoolean("parallelDownloads", true);
+        if (data.has("connectionsPerFile")) connectionsPerFile = MultiThreadDownloader.normalizeConnections(data.optInt("connectionsPerFile", 4));
         if (data.has("askDownloadLocation")) askDownloadLocation = data.optBoolean("askDownloadLocation", false);
         if (data.has("downloadLocation")) downloadLocation = data.optString("downloadLocation", "");
 
@@ -1957,48 +1965,142 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 toast("Could not save to the selected folder. Using app downloads.");
             }
 
-            DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-            if (manager == null) {
-                toast("Downloads are not available on this device.");
-                return;
-            }
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            if (!mime.isEmpty()) request.setMimeType(mime);
-            if (userAgent != null && !userAgent.isEmpty()) {
-                request.addRequestHeader("User-Agent", userAgent);
-            }
-            String cookie = CookieManager.getInstance().getCookie(url);
-            if (cookie != null && !cookie.isEmpty()) {
-                request.addRequestHeader("Cookie", cookie);
-            }
-            request.setTitle(filename);
-            request.setDescription("4Keeper download");
-            request.setDestinationInExternalFilesDir(getContext(), Environment.DIRECTORY_DOWNLOADS, filename);
-            request.setNotificationVisibility(
-                downloadNotifications
-                    ? DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                    : DownloadManager.Request.VISIBILITY_HIDDEN
-            );
-            long id = manager.enqueue(request);
+            startNativeDownload(url, filename, mime, userAgent, sourceTabId);
+        } catch (Exception error) {
+            toast("Could not start the download.");
+        }
+    }
 
-            JSONObject record = new JSONObject();
-            record.put("id", id);
-            record.put("filename", filename);
-            record.put("url", url);
-            record.put("mime", mime);
-            record.put("timestamp", System.currentTimeMillis());
-            record.put("tabId", sourceTabId);
-            addDownloadRecord(record);
+    /**
+     * Routes a download through the native multi-threaded engine instead of
+     * Android's DownloadManager, so the "Connections per file" setting (1, 4,
+     * 8 or 16 ranged connections) is actually used.
+     */
+    private void startNativeDownload(String url, String filename, String mime, String userAgent, int sourceTabId) {
+        File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
+        if (!dir.exists() && !dir.mkdirs()) {
+            toast("Could not create the download folder.");
+            return;
+        }
+        File target = uniqueDownloadFile(dir, filename);
+        String name = target.getName();
+        String resolvedMime = mime == null ? "" : mime;
+        long id = System.currentTimeMillis() * 1000L + (long) (Math.random() * 1000);
+        final int threads = connectionsPerFile;
 
+        JSONObject record = new JSONObject();
+        record.put("id", id);
+        record.put("filename", name);
+        record.put("url", url);
+        record.put("mime", resolvedMime);
+        record.put("timestamp", System.currentTimeMillis());
+        record.put("tabId", sourceTabId);
+        record.put("custom", true);
+        record.put("status", "pending");
+        record.put("bytes", 0);
+        record.put("totalBytes", 0);
+        record.put("connections", threads);
+        record.put("uri", Uri.fromFile(target).toString());
+        addDownloadRecord(record);
+
+        JSObject started = new JSObject();
+        started.put("id", id);
+        started.put("filename", name);
+        started.put("url", url);
+        started.put("tabId", sourceTabId);
+        notifyListeners("downloadStarted", started);
+
+        String cookie = CookieManager.getInstance().getCookie(url);
+        MultiThreadDownloader downloader = new MultiThreadDownloader(
+            url,
+            target,
+            threads,
+            userAgent,
+            cookie,
+            (bytes, total) -> {
+                updateCustomRecord(id, "running", bytes, total);
+                notifyDownloadProgress(id, bytes, total, "running");
+            }
+        );
+        activeDownloaders.put(id, downloader);
+
+        Runnable job = () -> runNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+        if (downloadExecutor == null) {
+            runNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+            return;
+        }
+        if (parallelDownloads) {
+            downloadExecutor.execute(job);
+        } else {
+            downloadExecutor.execute(() -> {
+                synchronized (serialDownloadLock) {
+                    job.run();
+                }
+            });
+        }
+    }
+
+    private void runNativeDownload(
+        long id,
+        File target,
+        String filename,
+        String mime,
+        String url,
+        int sourceTabId,
+        MultiThreadDownloader downloader
+    ) {
+        long bytes = 0;
+        long total = 0;
+        try {
+            updateCustomRecord(id, "running", 0, 0);
+            downloader.download();
+            bytes = downloader.getDownloadedBytes();
+            total = downloader.getTotalBytes();
+            if (total <= 0) total = bytes;
+            updateCustomRecord(id, "successful", bytes, total);
+            notifyDownloadProgress(id, bytes, total, "successful");
+            if (downloadNotifications) toast("Downloaded " + filename);
+
+            Uri fileUri = Uri.fromFile(target);
+            boolean isPdf = isPdf(filename, mime);
+            if (autoOpenDownload || (autoOpenPdf && isPdf)) {
+                getActivity().runOnUiThread(() -> startViewIntent(fileUri, mime));
+            }
             JSObject data = new JSObject();
             data.put("id", id);
             data.put("filename", filename);
             data.put("url", url);
             data.put("tabId", sourceTabId);
-            notifyListeners("downloadStarted", data);
+            getActivity().runOnUiThread(() -> notifyListeners("downloadFinished", data));
         } catch (Exception error) {
-            toast("Could not start download.");
+            bytes = downloader.getDownloadedBytes();
+            total = downloader.getTotalBytes();
+            if (total <= 0) total = 0;
+            updateCustomRecord(id, "failed", bytes, total);
+            notifyDownloadProgress(id, bytes, total, "failed");
+            if (downloader.isCancelled()) {
+                toast("Download cancelled: " + filename);
+            } else {
+                toast("Download failed: " + filename);
+            }
+        } finally {
+            activeDownloaders.remove(id);
         }
+    }
+
+    /** Picks a free file name so an existing download is never overwritten. */
+    private static File uniqueDownloadFile(File dir, String filename) {
+        String name = filename == null || filename.trim().isEmpty() ? "download" : filename.trim();
+        name = name.replace('/', '_').replace('\\', '_');
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        File candidate = new File(dir, name);
+        for (int index = 1; index < 500 && candidate.exists(); index++) {
+            candidate = new File(dir, base + " (" + index + ")" + ext);
+        }
+        return candidate;
     }
 
     private Uri createTreeDocument(Uri treeUri, String filename, String mime) {
@@ -2340,10 +2442,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
         JSONObject record = findDownloadRecord(id);
         if (record != null && record.optBoolean("custom", false)) {
+            MultiThreadDownloader active = activeDownloaders.remove(id);
+            if (active != null) active.cancel();
             String uriValue = record.optString("uri", "");
             if (!uriValue.isEmpty()) {
                 try {
-                    getContext().getContentResolver().delete(Uri.parse(uriValue), null, null);
+                    Uri fileTarget = Uri.parse(uriValue);
+                    if ("file".equalsIgnoreCase(fileTarget.getScheme())) {
+                        String path = fileTarget.getPath();
+                        if (path != null) {
+                            File file = new File(path);
+                            if (file.exists()) file.delete();
+                        }
+                    } else {
+                        getContext().getContentResolver().delete(fileTarget, null, null);
+                    }
                 } catch (Exception ignored) {
                 }
             }
@@ -2390,6 +2503,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
             downloadExecutor.shutdownNow();
             downloadExecutor = null;
         }
+        for (MultiThreadDownloader downloader : activeDownloaders.values()) {
+            downloader.cancel();
+        }
+        activeDownloaders.clear();
         for (Integer id : new ArrayList<>(tabs.keySet())) {
             destroyTab(tabs.remove(id));
         }

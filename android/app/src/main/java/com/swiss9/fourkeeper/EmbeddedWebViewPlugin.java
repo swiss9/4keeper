@@ -44,6 +44,7 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.FileProvider;
+import androidx.webkit.ScriptHandler;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -257,7 +258,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         final WebView view;
         String url = "";
         String title = "";
-        WebViewCompat.ScriptHandler privacyHandler;
+        ScriptHandler privacyHandler;
 
         Tab(int id, WebView view) {
             this.id = id;
@@ -1268,12 +1269,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
     public void goBack(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
-            if (tab != null && tab.view.canGoBack()) {
-                tab.view.goBack();
-                call.resolve(true);
-            } else {
-                call.resolve(false);
-            }
+            boolean moved = tab != null && tab.view.canGoBack();
+            if (moved) tab.view.goBack();
+            JSObject result = new JSObject();
+            result.put("moved", moved);
+            call.resolve(result);
         });
     }
 
@@ -1281,12 +1281,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
     public void goForward(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
-            if (tab != null && tab.view.canGoForward()) {
-                tab.view.goForward();
-                call.resolve(true);
-            } else {
-                call.resolve(false);
-            }
+            boolean moved = tab != null && tab.view.canGoForward();
+            if (moved) tab.view.goForward();
+            JSObject result = new JSObject();
+            result.put("moved", moved);
+            call.resolve(result);
         });
     }
 

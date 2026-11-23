@@ -5296,7 +5296,7 @@ async function backInBrowser() {
     const moved = await callPlugin('goBack');
     setLoading(true);
     window.setTimeout(syncNav, 250);
-    return moved !== false;
+    return !moved || moved.moved !== false;
   } catch (error) {
     return false;
   } finally {

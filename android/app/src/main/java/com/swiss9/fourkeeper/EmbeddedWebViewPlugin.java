@@ -68,7 +68,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -86,6 +90,63 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
+
+    /* Hides ad containers that survive network blocking (in-page slots, GPT
+     * wrappers, sponsored boxes) without touching legitimate layout. */
+    private static final String AD_HIDE_CSS_JS =
+        "(function(){try{"
+            + "if(document.getElementById('4k-adhide'))return;"
+            + "var css='[id*=\"google_ads\"],[id*=\"div-gpt-ad\"],[id*=\"taboola\"],"
+            + "[id*=\"outbrain\"],[class*=\"ad-banner\"],[class*=\"ad-container\"],"
+            + "[class*=\"ad-slot\"],[class*=\"ad-wrapper\"],[class*=\"adsbygoogle\"],"
+            + "[class*=\"sponsored-ad\"],[data-ad-slot],[data-ad-client],"
+            + "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
+            + "iframe[src*=\"amazon-adsystem.com\"]"
+            + "{display:none!important;height:0!important;min-height:0!important;margin:0!important;"
+            + "padding:0!important;border:0!important;overflow:hidden!important;}';"
+            + "var s=document.createElement('style');s.id='4k-adhide';s.textContent=css;"
+            + "(document.head||document.documentElement).appendChild(s);"
+            + "}catch(e){}})();";
+
+    /* Anti-fingerprinting. Runs before page scripts when document-start
+     * injection is available, so the getters are in place for the first read.
+     * Every override is guarded, so re-injection on later navigations is
+     * harmless. */
+    private static final String PRIVACY_SCRIPT =
+        "(function(){try{"
+            + "if(window.__4kPrivacy)return;window.__4kPrivacy=1;"
+            + "var define=function(obj,key,value){try{"
+            + "Object.defineProperty(obj,key,{get:function(){return value;},configurable:true});"
+            + "}catch(e){}};"
+            + "var n=window.navigator;"
+            + "if(n){"
+            + "define(n,'hardwareConcurrency',2);"
+            + "define(n,'deviceMemory',2);"
+            + "define(n,'platform','Win32');"
+            + "}"
+            + "var proto=window.HTMLCanvasElement&&HTMLCanvasElement.prototype;"
+            + "if(proto&&!proto.__4kNoise){"
+            + "var raw=proto.toDataURL;"
+            + "proto.toDataURL=function(){"
+            + "var args=arguments;"
+            + "try{"
+            + "var ctx=this.getContext&&this.getContext('2d');"
+            + "if(!ctx||!this.width||!this.height)return raw.apply(this,args);"
+            + "var w=Math.min(this.width,32),h=Math.min(this.height,32);"
+            + "var img=ctx.getImageData(0,0,w,h);"
+            + "var backup=new Uint8ClampedArray(img.data);"
+            + "for(var i=0;i<img.data.length;i+=4){"
+            + "img.data[i]=(img.data[i]+(Math.random()*4|0))&255;"
+            + "img.data[i+1]=(img.data[i+1]+(Math.random()*4|0))&255;"
+            + "img.data[i+2]=(img.data[i+2]+(Math.random()*4|0))&255;}"
+            + "ctx.putImageData(img,0,0);"
+            + "try{return raw.apply(this,args);}"
+            + "finally{try{var restore=ctx.createImageData(w,h);"
+            + "restore.data.set(backup);ctx.putImageData(restore,0,0);}catch(e){}}"
+            + "}catch(e){return raw.apply(this,args);}"
+            + "};"
+            + "proto.__4kNoise=1;}"
+            + "}catch(e){}})();";
 
     private static final String MEDIA_SCAN_JS =
         "(function(){var out=[];var seen={};"
@@ -133,11 +194,70 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "branch.io"
     };
 
+    /* Network-level ad blocklist. A HashSet keeps the per-request check O(1)
+     * with no parser and no native dependency, so the Android build stays
+     * simple and request handling stays fast. Entries are domain suffixes:
+     * any subdomain of a listed domain is blocked too. */
+    private static final HashSet<String> AD_DOMAINS = new HashSet<>(Arrays.asList(
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "app-measurement.com",
+        "adservice.google.com",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "googletagservices.com",
+        "amazon-adsystem.com",
+        "adsrvr.org",
+        "adnxs.com",
+        "casalemedia.com",
+        "criteo.com",
+        "criteo.net",
+        "taboola.com",
+        "outbrain.com",
+        "pubmatic.com",
+        "rubiconproject.com",
+        "openx.net",
+        "smartadserver.com",
+        "adform.net",
+        "moatads.com",
+        "adsafeprotected.com",
+        "doubleverify.com",
+        "serving-sys.com",
+        "flashtalking.com",
+        "zedo.com",
+        "yieldmo.com",
+        "adroll.com",
+        "bidswitch.net",
+        "sharethrough.com",
+        "spotxchange.com",
+        "tremorhub.com",
+        "teads.tv",
+        "3lift.com",
+        "scorecardresearch.com",
+        "quantserve.com",
+        "hotjar.com",
+        "mixpanel.com",
+        "branch.io",
+        "applovin.com",
+        "adcolony.com",
+        "unityads.unity3d.com",
+        "vungle.com",
+        "chartboost.com",
+        "inmobi.com",
+        "startappservice.com",
+        "tapjoy.com",
+        "supersonicads.com",
+        "ironsrc.com",
+        "mopub.com"
+    ));
+
     private static class Tab {
         final int id;
         final WebView view;
         String url = "";
         String title = "";
+        WebViewCompat.ScriptHandler privacyHandler;
 
         Tab(int id, WebView view) {
             this.id = id;
@@ -230,6 +350,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean popupsEnabled = true;
     private boolean safeBrowsingEnabled = true;
     private boolean trackingProtectionEnabled = false;
+    private boolean adBlockEnabled = false;
+    private boolean fingerprintBlockEnabled = false;
     private boolean desktopMode = false;
     private boolean pinchZoomEnabled = true;
     private boolean zoomControlsVisible = false;
@@ -285,6 +407,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         popupsEnabled = prefs.getBoolean("popupsEnabled", true);
         safeBrowsingEnabled = prefs.getBoolean("safeBrowsingEnabled", true);
         trackingProtectionEnabled = prefs.getBoolean("trackingProtectionEnabled", false);
+        adBlockEnabled = prefs.getBoolean("adBlockEnabled", false);
+        fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", false);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
         zoomControlsVisible = prefs.getBoolean("zoomControlsVisible", false);
@@ -338,6 +462,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("popupsEnabled", popupsEnabled)
             .putBoolean("safeBrowsingEnabled", safeBrowsingEnabled)
             .putBoolean("trackingProtectionEnabled", trackingProtectionEnabled)
+            .putBoolean("adBlockEnabled", adBlockEnabled)
+            .putBoolean("fingerprintBlockEnabled", fingerprintBlockEnabled)
             .putBoolean("desktopMode", desktopMode)
             .putBoolean("pinchZoomEnabled", pinchZoomEnabled)
             .putBoolean("zoomControlsVisible", zoomControlsVisible)
@@ -506,6 +632,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         Tab tab = new Tab(id, view);
         tabs.put(id, tab);
+        syncPrivacyScript(tab);
 
         FrameLayout root = rootView();
         if (root != null) {
@@ -541,6 +668,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
             tab.view.setWebChromeClient(null);
             /* Detach the clients so no late callback can reach a destroyed view. */
             tab.view.setWebViewClient(new WebViewClient());
+            if (tab.privacyHandler != null) {
+                tab.privacyHandler.remove();
+                tab.privacyHandler = null;
+            }
         } catch (Exception ignored) {
         }
         try {
@@ -608,6 +739,58 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return false;
     }
 
+    /* Walks the host's parent domains (ads.example.com -> example.com -> com)
+     * and stops at the first HashSet hit, so no list is scanned per request. */
+    private static boolean isAdHost(String host) {
+        if (host == null) return false;
+        String lower = host.toLowerCase(Locale.US);
+        int start = 0;
+        while (start < lower.length()) {
+            if (AD_DOMAINS.contains(lower.substring(start))) return true;
+            int dot = lower.indexOf('.', start);
+            if (dot < 0) break;
+            start = dot + 1;
+        }
+        return false;
+    }
+
+    private static WebResourceResponse blockedResponse() {
+        return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+    }
+
+    private void injectPrivacyScript(WebView view) {
+        if (view == null || !fingerprintBlockEnabled || !javaScriptEnabled) return;
+        try {
+            view.evaluateJavascript(PRIVACY_SCRIPT, null);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /* Document-start injection is the only point where the overrides exist
+     * before page scripts read them. onPageStarted keeps the evaluateJavascript
+     * fallback for WebViews without that feature. */
+    private void syncPrivacyScript(Tab tab) {
+        if (tab == null) return;
+        try {
+            if (tab.privacyHandler != null) {
+                tab.privacyHandler.remove();
+                tab.privacyHandler = null;
+            }
+        } catch (Exception ignored) {
+        }
+        if (!fingerprintBlockEnabled || !javaScriptEnabled) return;
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                tab.privacyHandler = WebViewCompat.addDocumentStartJavaScript(
+                    tab.view,
+                    PRIVACY_SCRIPT,
+                    Collections.singleton("*")
+                );
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private String encodeFavicon(Bitmap bitmap) {
         if (bitmap == null || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) return null;
         try {
@@ -651,6 +834,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (tab != null && url != null && !"about:blank".equals(url) && !url.startsWith("data:")) {
                 tab.url = url;
             }
+            injectPrivacyScript(view);
             JSObject data = new JSObject();
             data.put("tabId", tabId);
             data.put("activeTabId", activeTabId);
@@ -666,6 +850,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 tab.title = view.getTitle() == null ? tab.title : view.getTitle();
             }
             view.evaluateJavascript(TAP_STYLE_JS, null);
+            if (adBlockEnabled) {
+                view.evaluateJavascript(AD_HIDE_CSS_JS, null);
+            }
             if (snifferEnabled) {
                 view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
             }
@@ -700,10 +887,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             detectMediaRequest(tabId, request);
-            if (trackingProtectionEnabled && !request.isForMainFrame()) {
+            if (!request.isForMainFrame()) {
                 String host = request.getUrl().getHost();
-                if (isTracker(host)) {
-                    return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+                if (adBlockEnabled && isAdHost(host)) {
+                    return blockedResponse();
+                }
+                if (trackingProtectionEnabled && isTracker(host)) {
+                    return blockedResponse();
                 }
             }
             return null;
@@ -1259,6 +1449,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("safeBrowsing")) safeBrowsingEnabled = data.optBoolean("safeBrowsing", true);
         if (data.has("darkMode")) webDarkMode = data.optBoolean("darkMode", false);
         if (data.has("trackingProtection")) trackingProtectionEnabled = data.optBoolean("trackingProtection", false);
+        if (data.has("isAdBlockEnabled")) adBlockEnabled = data.optBoolean("isAdBlockEnabled", false);
+        if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", false);
         if (data.has("zoomControls")) zoomControlsVisible = data.optBoolean("zoomControls", false);
         if (data.has("pinchZoom")) pinchZoomEnabled = data.optBoolean("pinchZoom", true);
         if (data.has("downloadNotifications")) downloadNotifications = data.optBoolean("downloadNotifications", true);
@@ -1272,6 +1464,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             for (Tab tab : tabs.values()) {
                 applySettingsTo(tab.view);
+                syncPrivacyScript(tab);
             }
         });
         call.resolve();

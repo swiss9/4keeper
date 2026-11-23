@@ -78,6 +78,8 @@ const DEFAULT_SETTINGS = {
   showFullUrl: false,
   webDarkMode: false,
   trackingProtection: false,
+  adBlock: false,
+  fingerprintBlock: false,
   safeBrowsing: true,
   cookies: 'all',
   javaScript: true,
@@ -1507,6 +1509,8 @@ function pushNativeSettings(reload) {
     safeBrowsing: !!settings.safeBrowsing,
     darkMode: !!settings.webDarkMode,
     trackingProtection: !!settings.trackingProtection,
+    isAdBlockEnabled: !!settings.adBlock,
+    isFingerprintBlockEnabled: !!settings.fingerprintBlock,
     zoomControls: !!settings.zoomControls,
     pinchZoom: !!settings.pinchZoom,
     downloadNotifications: !!settings.downloadNotifications,
@@ -1533,6 +1537,8 @@ const NATIVE_SETTING_KEYS = [
   'safeBrowsing',
   'webDarkMode',
   'trackingProtection',
+  'adBlock',
+  'fingerprintBlock',
   'zoomControls',
   'pinchZoom',
   'downloadNotifications',
@@ -3933,6 +3939,8 @@ function renderSiteInfo() {
     ['Cookies', cookiesLabel()],
     ['JavaScript', settings.javaScript ? 'Allowed' : 'Blocked'],
     ['Pop-ups', settings.popups ? 'Allowed' : 'Blocked'],
+    ['Ad blocking', settings.adBlock ? 'On for all sites' : 'Off'],
+    ['Fingerprint protection', settings.fingerprintBlock ? 'On' : 'Off'],
     ['Tracking protection', settings.trackingProtection ? 'On for all sites' : 'Off'],
     ['Web dark mode', settings.webDarkMode ? 'On' : 'Off'],
     ['Desktop site', settings.desktopMode ? 'On' : 'Off'],
@@ -4117,6 +4125,8 @@ function settingsPageSearch() {
 
 function settingsPagePrivacy() {
   return settingSection('Protection', `
+      ${settingRowToggle('adBlock', 'Ad & Tracker Blocking', 'Block ad networks and hide ad containers')}
+      ${settingRowToggle('fingerprintBlock', 'Fingerprint Protection', 'Spoof device details and canvas output')}
       ${settingRowToggle('trackingProtection', 'Tracking protection', 'Block known tracking hosts')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
     `) +
@@ -4901,7 +4911,17 @@ function attachUiListeners() {
       if (!key || !(key in DEFAULT_SETTINGS)) return;
       const patch = {};
       patch[key] = !settings[key];
-      const reload = ['javaScript', 'popups', 'textZoom', 'desktopMode', 'webDarkMode', 'pinchZoom', 'zoomControls'].includes(key);
+      const reload = [
+        'javaScript',
+        'popups',
+        'textZoom',
+        'desktopMode',
+        'webDarkMode',
+        'pinchZoom',
+        'zoomControls',
+        'adBlock',
+        'fingerprintBlock'
+      ].includes(key);
       updateSetting(patch, { reload, rerender: true });
       return;
     }

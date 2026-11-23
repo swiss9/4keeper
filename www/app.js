@@ -92,7 +92,9 @@ const DEFAULT_SETTINGS = {
   askDownloadLocation: false,
   autoOpenPdf: false,
   autoOpenDownload: false,
-  parallelDownloads: true
+  parallelDownloads: true,
+  speedLimit: 0,
+  maxParallelDownloads: 3
 };
 
 const ICONS = {
@@ -169,6 +171,7 @@ let tabDownloadIndex = {};
 let mediaToastAt = 0;
 let mediaToastTabId = -1;
 let currentSettingsSection = null;
+let settingsView = 'app';
 let navCanBack = false;
 let navCanForward = false;
 let listenersAttached = false;
@@ -216,7 +219,13 @@ const dom = {
   dashboardSearch: $('dashboardSearch'),
   dashboardSearchInput: $('dashboardSearchInput'),
   dashboardSearchClear: $('dashboardSearchClear'),
-  dashboardGlobeBtn: $('dashboardGlobeBtn'),
+  dashboardPasteHeaderBtn: $('dashboardPasteHeaderBtn'),
+  sideDrawer: $('sideDrawer'),
+  sideDrawerBackdrop: $('sideDrawerBackdrop'),
+  sideDrawerClose: $('sideDrawerClose'),
+  drawerDownloadsBtn: $('drawerDownloadsBtn'),
+  drawerHistoryBtn: $('drawerHistoryBtn'),
+  drawerBookmarksBtn: $('drawerBookmarksBtn'),
   dashboardFilters: $('dashboardFilters'),
   dashboardSortBtn: $('dashboardSortBtn'),
   dashboardSortMenu: $('dashboardSortMenu'),
@@ -1274,6 +1283,29 @@ function closeMenu() {
   closeSheet('menu', dom.menuSheet, dom.menuBackdrop);
 }
 
+/* ---------------------------------------------------------- Side drawer */
+
+function openSideDrawer() {
+  if (!dom.sideDrawer) return;
+  overlays.add('drawer');
+  hideSuggestions();
+  dom.sideDrawer.classList.add('open');
+  dom.sideDrawer.setAttribute('aria-hidden', 'false');
+  if (dom.sideDrawerBackdrop) dom.sideDrawerBackdrop.classList.add('open');
+  if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'true');
+  syncNativeVisibility();
+}
+
+function closeSideDrawer() {
+  if (!dom.sideDrawer) return;
+  overlays.delete('drawer');
+  dom.sideDrawer.classList.remove('open');
+  dom.sideDrawer.setAttribute('aria-hidden', 'true');
+  if (dom.sideDrawerBackdrop) dom.sideDrawerBackdrop.classList.remove('open');
+  if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
+  syncNativeVisibility();
+}
+
 function openSiteInfo() {
   overlays.add('siteInfo');
   hideSuggestions();
@@ -1470,6 +1502,11 @@ const NATIVE_SETTING_KEYS = [
 
 function updateSetting(patch, options) {
   const opts = options || {};
+  /* The numeric ceiling drives the native parallel-download switch: more than
+   * one concurrent file means parallelism is on. */
+  if (patch.maxParallelDownloads !== undefined) {
+    patch = Object.assign({}, patch, { parallelDownloads: Number(patch.maxParallelDownloads) > 1 });
+  }
   settings = Object.assign({}, settings, patch);
   Store.save('settings');
   applyTheme();
@@ -2256,6 +2293,7 @@ function renderDashboardQueue() {
   }
   syncDashboardFilters();
   const items = dashboardDownloadItems();
+  dom.dashboardQueue.classList.toggle('is-empty', items.length === 0);
   dom.dashboardQueue.innerHTML = items.length ? items.map(dashboardRowMarkup).join('') : dashboardEmptyMarkup();
   updateDashboardStorage();
 }
@@ -2369,6 +2407,31 @@ async function pasteIntoDownloadInput() {
   } catch (error) {
     toast('Paste with the keyboard instead');
   }
+}
+
+/* Header clipboard button: read the clipboard, then pre-fill the download
+ * sheet so a link can be started with one more tap. */
+async function quickPasteFromHeader() {
+  const raw = await readClipboardText();
+  const url = normalizeClipboardUrl(raw);
+  if (!url) {
+    toast('No link on the clipboard');
+    return;
+  }
+  hideClipboardPrompt();
+  openDownloadSheet();
+  if (!dom.dashboardInput) return;
+  dom.dashboardInput.value = url;
+  window.setTimeout(() => {
+    if (!dom.dashboardInput) return;
+    dom.dashboardInput.focus();
+    try {
+      const end = dom.dashboardInput.value.length;
+      dom.dashboardInput.setSelectionRange(end, end);
+    } catch (error) {
+      /* ignore */
+    }
+  }, 200);
 }
 
 /* ------------------------------------------------------- Clipboard links */
@@ -3820,28 +3883,58 @@ function settingNavRow(icon, label, description, section, value) {
     </button>`;
 }
 
+function speedLimitLabel() {
+  const kb = Number(settings.speedLimit) || 0;
+  if (!kb) return 'Unlimited';
+  return kb >= 1024 ? (kb / 1024) + ' MB/s' : kb + ' KB/s';
+}
+
+function downloadFolderLabel() {
+  return settings.downloadLocation ? (settings.downloadLocationLabel || 'Custom folder') : 'App folder';
+}
+
+function maxParallelLabel() {
+  return String(Number(settings.maxParallelDownloads) || 1);
+}
+
+/* Two separate settings trees:
+ *  - 'app'     → Downloader settings (folder, speed, parallel downloads, theme)
+ *  - 'browser' → Browser settings (search engine, desktop mode, JavaScript, data)
+ * The About page is a section that sits on top of whichever tree is active. */
 function renderSettingsRoot() {
   currentSettingsSection = null;
-  dom.settingsTitle.textContent = 'Settings';
+  const browser = settingsView === 'browser';
+  dom.settingsTitle.textContent = browser ? 'Browser settings' : 'Downloader settings';
   dom.settingsRoot.classList.remove('hidden');
   dom.settingsPage.hidden = true;
   dom.settingsPage.classList.add('hidden');
   dom.settingsPage.innerHTML = '';
 
-  dom.settingsRoot.innerHTML = `
-    ${settingSection('General', `
-      ${settingNavRow('palette', 'Appearance', 'Theme, density and address style', 'appearance', themeLabel())}
-      ${settingNavRow('search', 'Search', 'Search engine, homepage and startup', 'search', engineLabel())}
-      ${settingNavRow('shield', 'Privacy and security', 'Tracking, cookies and safe browsing', 'privacy', cookiesLabel())}
-    `)}
-    ${settingSection('Content', `
-      ${settingNavRow('sliders', 'Site settings', 'JavaScript, pop-ups and zoom', 'site', (Number(settings.textZoom) || 100) + '%')}
-      ${settingNavRow('download', 'Downloads', 'Notifications and saved files', 'downloads', settings.downloadNotifications ? 'On' : 'Off')}
-    `)}
-    ${settingSection('Data', `
-      ${settingNavRow('trash', 'Delete browsing data', 'Clear history, cookies and cache', 'data')}
-      ${settingNavRow('info', 'About 4Keeper', 'Version, engine and licenses', 'about', appInfo && appInfo.versionName ? 'v' + appInfo.versionName : '')}
-    `)}`;
+  dom.settingsRoot.innerHTML = browser
+    ? settingSection('Browsing', `
+        ${settingRowButton('search', 'Search engine', 'Used when you type a query', engineLabel(), 'engine')}
+        ${settingRowToggle('desktopMode', 'Desktop mode', 'Request desktop versions of pages')}
+        ${settingRowToggle('javaScript', 'JavaScript', 'Required by most modern sites')}
+      `) +
+      settingSection('Data', `
+        ${settingRowAction('trash', 'Clear history', 'Remove history, cookies and cached data', 'clearData', true)}
+      `) +
+      settingSection('More', `
+        ${settingNavRow('search', 'Search options', 'Suggestions, language and homepage', 'search')}
+        ${settingNavRow('shield', 'Privacy and security', 'Tracking, cookies and safe browsing', 'privacy')}
+        ${settingNavRow('sliders', 'Site settings', 'Pop-ups, zoom and text size', 'site', (Number(settings.textZoom) || 100) + '%')}
+        ${settingNavRow('palette', 'Address bar', 'Density and full URL display', 'appearance')}
+      `) +
+      `<div class="setting-note">Browser settings apply to the WebView. Downloads and the app theme live in Downloader settings.</div>`
+    : settingSection('Downloads', `
+        ${settingRowButton('download', 'Download folder', 'Where saved files are kept', downloadFolderLabel(), 'downloadFolder')}
+        ${settingRowButton('sliders', 'Speed limit', 'Cap download bandwidth', speedLimitLabel(), 'speedLimit')}
+        ${settingRowButton('download', 'Max parallel downloads', 'Files downloading at once', maxParallelLabel(), 'maxParallel')}
+      `) +
+      settingSection('Appearance', `
+        ${settingRowButton('palette', 'App theme', 'System, light, dark or AMOLED', themeLabel(), 'theme')}
+      `) +
+      `<div class="setting-note">Downloader settings control how 4Keeper saves files. Browser settings live in the side menu.</div>`;
 }
 
 function settingsPageAppearance() {
@@ -3991,12 +4084,14 @@ function rerenderSettings() {
   dom.settingsPage.scrollTop = scroll;
 }
 
-function openSettingsScreen(section) {
+function openSettingsScreen(section, view) {
+  if (view === 'app' || view === 'browser') settingsView = view;
   if (section) showSettingsSection(section);
   else renderSettingsRoot();
   openScreen('settings', dom.settingsScreen);
   setBottomNavActive('settings');
   closeMenu();
+  closeSideDrawer();
 }
 
 function closeSettingsScreen() {
@@ -4017,6 +4112,23 @@ function handleSettingsAction(action) {
         { value: 'dark', label: 'Dark' },
         { value: 'amoled', label: 'AMOLED', desc: 'True black for OLED screens' }
       ], settings.theme, (value) => updateSetting({ theme: value }, { rerender: true, toastMessage: 'Theme updated' }));
+      break;
+    case 'speedLimit':
+      openChoice('Speed limit', [
+        { value: '0', label: 'Unlimited', desc: 'Use the full connection speed' },
+        { value: '512', label: '512 KB/s' },
+        { value: '1024', label: '1 MB/s' },
+        { value: '2048', label: '2 MB/s' },
+        { value: '5120', label: '5 MB/s' },
+        { value: '10240', label: '10 MB/s' }
+      ], String(Number(settings.speedLimit) || 0), (value) => updateSetting({ speedLimit: Number(value) || 0 }, { rerender: true, toastMessage: 'Speed limit updated' }));
+      break;
+    case 'maxParallel':
+      openChoice('Max parallel downloads', [1, 2, 3, 4, 5].map((count) => ({
+        value: String(count),
+        label: count + (count === 1 ? ' download' : ' downloads'),
+        desc: count === 3 ? 'Recommended' : ''
+      })), maxParallelLabel(), (value) => updateSetting({ maxParallelDownloads: Number(value) || 1 }, { rerender: true, toastMessage: 'Parallel downloads updated' }));
       break;
     case 'density':
       openChoice('Density', [
@@ -4247,19 +4359,15 @@ function attachUiListeners() {
     });
   }
   if (dom.dashboardMenuBtn) {
-    dom.dashboardMenuBtn.addEventListener('click', openMenu);
-  }
-  if (dom.dashboardMenuBtn) {
-    /* The dashboard hamburger belongs to the dashboard: it opens App Settings and
-     * must never open the browser side menu. */
+    /* The dashboard hamburger opens the side drawer, which links to the
+     * Downloader settings, the Browser settings and About. */
     dom.dashboardMenuBtn.addEventListener('click', () => {
-      if (overlays.has('menu')) closeMenu();
-      dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
-      openSettingsScreen();
+      if (overlays.has('drawer')) closeSideDrawer();
+      else openSideDrawer();
     });
   }
-  if (dom.dashboardGlobeBtn) {
-    dom.dashboardGlobeBtn.addEventListener('click', openBrowserFromDashboard);
+  if (dom.dashboardPasteHeaderBtn) {
+    dom.dashboardPasteHeaderBtn.addEventListener('click', quickPasteFromHeader);
   }
   if (dom.dashboardSearchBtn) {
     dom.dashboardSearchBtn.addEventListener('click', () => setDashboardSearch(!dashboardSearchOpen));
@@ -4376,8 +4484,34 @@ function attachUiListeners() {
     dom.navBrowserBtn.addEventListener('click', openBrowserFromDashboard);
   }
   if (dom.navSettingsBtn) {
-    dom.navSettingsBtn.addEventListener('click', () => openSettingsScreen());
+    /* Bottom navigation gear is the Downloader settings entry point. */
+    dom.navSettingsBtn.addEventListener('click', () => openSettingsScreen(null, 'app'));
   }
+
+  if (dom.sideDrawer) {
+    dom.sideDrawer.addEventListener('click', (event) => {
+      const navBtn = event.target.closest('[data-drawer-nav]');
+      if (navBtn) {
+        const target = navBtn.getAttribute('data-drawer-nav');
+        if (target === 'appSettings') openSettingsScreen(null, 'app');
+        else if (target === 'browserSettings') openSettingsScreen(null, 'browser');
+        else if (target === 'about') openSettingsScreen('about');
+        return;
+      }
+      if (event.target.closest('#drawerDownloadsBtn')) {
+        closeSideDrawer();
+        openDownloads();
+      } else if (event.target.closest('#drawerHistoryBtn')) {
+        closeSideDrawer();
+        openHistory();
+      } else if (event.target.closest('#drawerBookmarksBtn')) {
+        closeSideDrawer();
+        openBookmarks();
+      }
+    });
+  }
+  if (dom.sideDrawerClose) dom.sideDrawerClose.addEventListener('click', closeSideDrawer);
+  if (dom.sideDrawerBackdrop) dom.sideDrawerBackdrop.addEventListener('click', closeSideDrawer);
   if (dom.tabsBtn) {
     dom.tabsBtn.addEventListener('click', () => {
       if (overlays.has('tabs')) closeTabSheet();
@@ -4486,7 +4620,7 @@ function attachUiListeners() {
   dom.menuDownloadsBtn.addEventListener('click', openDownloads);
   dom.menuDesktopBtn.addEventListener('click', toggleDesktopSite);
   dom.menuReadingBtn.addEventListener('click', toggleReadingMode);
-  dom.menuSettingsBtn.addEventListener('click', () => openSettingsScreen());
+  dom.menuSettingsBtn.addEventListener('click', () => openSettingsScreen(null, 'browser'));
 
   dom.siteInfoCloseBtn.addEventListener('click', closeSiteInfo);
   dom.siteInfoBackdrop.addEventListener('click', closeSiteInfo);
@@ -4556,7 +4690,7 @@ function attachUiListeners() {
   dom.downloadsBackBtn.addEventListener('click', closeDownloads);
   dom.downloadsSettingsBtn.addEventListener('click', () => {
     closeDownloads();
-    openSettingsScreen('downloads');
+    openSettingsScreen(null, 'app');
   });
   dom.downloadsRefreshBtn.addEventListener('click', loadDownloads);
   dom.downloadsList.addEventListener('click', (event) => {
@@ -4577,14 +4711,9 @@ function attachUiListeners() {
 
   dom.settingsBackBtn.addEventListener('click', closeSettingsScreen);
 
-  dom.settingsRoot.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-section]');
-    if (!target) return;
-    const section = target.getAttribute('data-section');
-    if (section) showSettingsSection(section);
-  });
-
-  dom.settingsPage.addEventListener('click', (event) => {
+  /* The settings root and its sub-pages now share one handler: the root pages
+   * hold toggles and actions directly (they are no longer only navigation). */
+  const onSettingsClick = (event) => {
     const toggle = event.target.closest('[data-toggle]');
     if (toggle) {
       const key = toggle.getAttribute('data-toggle');
@@ -4603,9 +4732,11 @@ function attachUiListeners() {
     const section = event.target.closest('[data-section]');
     if (!section) return;
     const key = section.getAttribute('data-section');
-    if (key === 'root' || !key) renderSettingsRoot();
+    if (!key || key === 'root') renderSettingsRoot();
     else showSettingsSection(key);
-  });
+  };
+  dom.settingsRoot.addEventListener('click', onSettingsClick);
+  dom.settingsPage.addEventListener('click', onSettingsClick);
 
   dom.dialogBackdrop.addEventListener('click', closeDialog);
   dom.dialogCancel.addEventListener('click', closeDialog);
@@ -4622,6 +4753,7 @@ function attachUiListeners() {
     else if (overlays.has('choice')) closeChoice();
     else if (overlays.has('tabs')) closeTabSheet();
     else if (overlays.has('menu')) closeMenu();
+    else if (overlays.has('drawer')) closeSideDrawer();
     else if (overlays.has('siteInfo')) closeSiteInfo();
     else if (overlays.has('suggestions')) hideSuggestions();
     else if (overlays.has('settings')) closeSettingsScreen();

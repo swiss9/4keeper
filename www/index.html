@@ -82,7 +82,9 @@
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
             <div class="dl-topbar-text">
-              <h1 class="dl-title">4Keeper</h1>
+              <div class="dl-brand">
+                <img src="assets/logo.png" class="dl-logo" alt="4Keeper" />
+              </div>
               <p id="dashboardStorage" class="dl-subtitle">Universal Media Downloader</p>
               <div
                 id="dashboardStorageBar"
@@ -100,8 +102,8 @@
               <button id="dashboardSearchBtn" class="dl-icon-btn" type="button" aria-label="Search downloads" aria-expanded="false">
                 <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.7-3.7"/></svg>
               </button>
-              <button id="dashboardGlobeBtn" class="dl-icon-btn" type="button" aria-label="Open browser">
-                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9Z"/></svg>
+              <button id="dashboardPasteHeaderBtn" class="dl-icon-btn" type="button" aria-label="Paste link and download">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19"/></svg>
               </button>
             </div>
           </header>
@@ -173,7 +175,7 @@
             </button>
           </div>
 
-          <div id="dashboardQueue" class="dl-queue" role="tabpanel" aria-live="polite" aria-label="Download queue">
+          <div id="dashboardQueue" class="dl-queue is-empty" role="tabpanel" aria-live="polite" aria-label="Download queue">
             <div class="dl-empty">
               <div class="dl-empty-body">
                 <span class="dl-empty-icon" aria-hidden="true">
@@ -357,6 +359,65 @@
       </div>
     </section>
     </div>
+
+    <!-- Side Drawer -->
+    <div id="sideDrawerBackdrop" class="drawer-backdrop"></div>
+    <aside id="sideDrawer" class="side-drawer" role="dialog" aria-modal="true" aria-label="App Menu" aria-hidden="true">
+      <div class="drawer-head">
+        <div class="drawer-brand">
+          <img src="assets/logo.png" class="drawer-logo" alt="" width="32" height="32" />
+          <div class="drawer-brand-text">
+            <span class="drawer-brand-title">4Keeper</span>
+            <span class="drawer-brand-sub">Universal Media Downloader</span>
+          </div>
+        </div>
+        <button id="sideDrawerClose" class="icon-btn" type="button" aria-label="Close menu">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <div class="drawer-section-title">Navigation &amp; Settings</div>
+        <button class="drawer-row" type="button" data-drawer-nav="appSettings">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <div class="drawer-row-main">
+            <span class="drawer-row-label">Downloader Settings</span>
+            <span class="drawer-row-desc">Folder, speed limit, max downloads, theme</span>
+          </div>
+          <svg class="icon icon-sm drawer-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+        <button class="drawer-row" type="button" data-drawer-nav="browserSettings">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9Z"/></svg>
+          <div class="drawer-row-main">
+            <span class="drawer-row-label">Browser Settings</span>
+            <span class="drawer-row-desc">Search engine, JS, desktop mode, history</span>
+          </div>
+          <svg class="icon icon-sm drawer-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+        <button class="drawer-row" type="button" data-drawer-nav="about">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+          <div class="drawer-row-main">
+            <span class="drawer-row-label">About 4Keeper</span>
+            <span class="drawer-row-desc">App version, licenses, system info</span>
+          </div>
+          <svg class="icon icon-sm drawer-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+
+        <div class="drawer-divider"></div>
+        <div class="drawer-section-title">Quick Actions</div>
+        <button id="drawerDownloadsBtn" class="drawer-row" type="button">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span class="drawer-row-label">Downloads</span>
+        </button>
+        <button id="drawerHistoryBtn" class="drawer-row" type="button">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+          <span class="drawer-row-label">History</span>
+        </button>
+        <button id="drawerBookmarksBtn" class="drawer-row" type="button">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4.5L6 21Z"/><path d="M9 8h6"/></svg>
+          <span class="drawer-row-label">Bookmarks</span>
+        </button>
+      </div>
+    </aside>
 
     <!-- Site information -->
     <div id="siteInfoBackdrop" class="backdrop"></div>

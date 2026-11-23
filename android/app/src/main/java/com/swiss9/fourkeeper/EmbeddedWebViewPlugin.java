@@ -1989,20 +1989,25 @@ public class EmbeddedWebViewPlugin extends Plugin {
         long id = System.currentTimeMillis() * 1000L + (long) (Math.random() * 1000);
         final int threads = connectionsPerFile;
 
-        JSONObject record = new JSONObject();
-        record.put("id", id);
-        record.put("filename", name);
-        record.put("url", url);
-        record.put("mime", resolvedMime);
-        record.put("timestamp", System.currentTimeMillis());
-        record.put("tabId", sourceTabId);
-        record.put("custom", true);
-        record.put("status", "pending");
-        record.put("bytes", 0);
-        record.put("totalBytes", 0);
-        record.put("connections", threads);
-        record.put("uri", Uri.fromFile(target).toString());
-        addDownloadRecord(record);
+        try {
+            JSONObject record = new JSONObject();
+            record.put("id", id);
+            record.put("filename", name);
+            record.put("url", url);
+            record.put("mime", resolvedMime);
+            record.put("timestamp", System.currentTimeMillis());
+            record.put("tabId", sourceTabId);
+            record.put("custom", true);
+            record.put("status", "pending");
+            record.put("bytes", 0);
+            record.put("totalBytes", 0);
+            record.put("connections", threads);
+            record.put("uri", Uri.fromFile(target).toString());
+            addDownloadRecord(record);
+        } catch (Exception error) {
+            toast("Could not start the download.");
+            return;
+        }
 
         JSObject started = new JSObject();
         started.put("id", id);

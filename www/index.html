@@ -56,6 +56,18 @@
             <path d="M18 6 6 18M6 6l12 12"/>
           </svg>
         </button>
+        <!-- Browser-only overflow menu. The toolbar itself is hidden in
+             dashboard mode, so this control never reaches the dashboard. -->
+        <button
+          id="browserMenuBtn"
+          class="icon-btn"
+          type="button"
+          aria-label="Browser menu"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+        >
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+        </button>
       </div>
       <div id="progressBar" class="progress-bar"></div>
       <div id="suggestions" class="suggestions hidden" role="listbox" aria-label="Suggestions">
@@ -81,29 +93,26 @@
             <button id="dashboardMenuBtn" class="dl-icon-btn" type="button" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false">
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
-            <div class="dl-topbar-text">
-              <div class="dl-brand">
-                <img src="assets/logo.png" class="dl-logo" alt="4Keeper" />
-              </div>
-              <p id="dashboardStorage" class="dl-subtitle">Universal Media Downloader</p>
-              <div
-                id="dashboardStorageBar"
-                class="dl-storage-bar"
-                role="progressbar"
-                aria-label="Device storage used"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow="0"
-              >
-                <span id="dashboardStorageFill" class="dl-storage-fill"></span>
+            <div class="dl-topbar-brand">
+              <img src="assets/logo.png" class="dl-logo" alt="4Keeper" />
+              <div class="dl-brand-meta">
+                <p id="dashboardStorage" class="dl-storage-text">Checking storage…</p>
+                <div
+                  id="dashboardStorageBar"
+                  class="dl-storage-bar"
+                  role="progressbar"
+                  aria-label="Device storage used"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <span id="dashboardStorageFill" class="dl-storage-fill"></span>
+                </div>
               </div>
             </div>
             <div class="dl-topbar-actions">
               <button id="dashboardSearchBtn" class="dl-icon-btn" type="button" aria-label="Search downloads" aria-expanded="false">
                 <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.7-3.7"/></svg>
-              </button>
-              <button id="dashboardPasteHeaderBtn" class="dl-icon-btn" type="button" aria-label="Paste link and download">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19"/></svg>
               </button>
             </div>
           </header>
@@ -237,20 +246,22 @@
       </div>
       <div class="sheet-body flush dl-sheet-body">
         <form id="dashboardForm" class="dl-form" autocomplete="off">
-          <div class="dl-input-wrap">
-            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19"/></svg>
-            <input
-              id="dashboardInput"
-              class="dl-input"
-              type="text"
-              inputmode="url"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              enterkeyhint="go"
-              placeholder="Paste link or search…"
-              aria-label="Paste a link or search"
-            />
+          <div class="dl-field-row">
+            <div class="dl-input-shell">
+              <svg class="icon icon-sm dl-input-icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19"/></svg>
+              <input
+                id="dashboardInput"
+                class="dl-input"
+                type="text"
+                inputmode="url"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                enterkeyhint="go"
+                placeholder="Paste link or search…"
+                aria-label="Paste a link or search"
+              />
+            </div>
             <button id="downloadPasteBtn" class="dl-paste" type="button" aria-label="Paste from clipboard">Paste</button>
           </div>
           <button class="dl-download-btn" type="submit">

@@ -94,7 +94,12 @@ const DEFAULT_SETTINGS = {
   autoOpenDownload: false,
   parallelDownloads: true,
   speedLimit: 0,
-  maxParallelDownloads: 3
+  maxParallelDownloads: 3,
+  /* Downloader power settings */
+  connectionsPerFile: 4,
+  wifiOnly: false,
+  autoRetry: true,
+  clipboardMonitoring: true
 };
 
 const ICONS = {
@@ -219,7 +224,6 @@ const dom = {
   dashboardSearch: $('dashboardSearch'),
   dashboardSearchInput: $('dashboardSearchInput'),
   dashboardSearchClear: $('dashboardSearchClear'),
-  dashboardPasteHeaderBtn: $('dashboardPasteHeaderBtn'),
   sideDrawer: $('sideDrawer'),
   sideDrawerBackdrop: $('sideDrawerBackdrop'),
   sideDrawerClose: $('sideDrawerClose'),
@@ -260,6 +264,7 @@ const dom = {
   tabDownloadsBtn: $('tabDownloadsBtn'),
   tabDownloadsMediaDot: $('tabDownloadsMediaDot'),
   menuBtn: $('menuBtn'),
+  browserMenuBtn: $('browserMenuBtn'),
   tabSheet: $('tabSheet'),
   tabSheetBackdrop: $('tabSheetBackdrop'),
   tabSheetTitle: $('tabSheetTitle'),
@@ -1196,6 +1201,7 @@ function openMenu() {
   dom.menuSheet.setAttribute('aria-hidden', 'false');
   dom.menuBackdrop.classList.add('open');
   if (dom.menuBtn) dom.menuBtn.setAttribute('aria-expanded', 'true');
+  if (dom.browserMenuBtn) dom.browserMenuBtn.setAttribute('aria-expanded', 'true');
   if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'true');
   closeOtherSheets('menu');
   updateMenuCounts();
@@ -1279,6 +1285,7 @@ function toggleReadingMode() {
 
 function closeMenu() {
   if (dom.menuBtn) dom.menuBtn.setAttribute('aria-expanded', 'false');
+  if (dom.browserMenuBtn) dom.browserMenuBtn.setAttribute('aria-expanded', 'false');
   if (dom.dashboardMenuBtn) dom.dashboardMenuBtn.setAttribute('aria-expanded', 'false');
   closeSheet('menu', dom.menuSheet, dom.menuBackdrop);
 }
@@ -1516,6 +1523,7 @@ function updateSetting(patch, options) {
   }
   if (opts.rerender) rerenderSettings();
   if (opts.toastMessage) toast(opts.toastMessage);
+  if (patch.clipboardMonitoring !== undefined && !settings.clipboardMonitoring) hideClipboardPrompt();
   if (patch.showFullUrl !== undefined) syncActiveTabUi();
   if (patch.suggestions !== undefined && !settings.suggestions) hideSuggestions();
   if (
@@ -2246,20 +2254,36 @@ function dashboardEmptyMarkup() {
     </div>`;
 }
 
+function freeSpaceLabel(freeBytes) {
+  const value = Number(freeBytes) || 0;
+  if (value <= 0) return '';
+  const gb = value / 1073741824;
+  if (gb >= 100) return Math.round(gb) + ' GB Free';
+  if (gb >= 1) return gb.toFixed(1).replace(/\.0$/, '') + ' GB Free';
+  const mb = value / 1048576;
+  if (mb >= 1) return Math.round(mb) + ' MB Free';
+  return Math.round(value / 1024) + ' KB Free';
+}
+
 function updateDashboardStorage() {
   const used = Number(downloadsUsage.usedBytes) || 0;
   const total = Number(downloadsUsage.totalBytes) || 0;
   const count = downloadsCache.length;
   const percent = total > 0 ? Math.max(0, Math.min(100, (used / total) * 100)) : 0;
+  const free = total > 0 ? Math.max(0, total - used) : 0;
   if (dom.dashboardStorage) {
+    /* The header shows the short free-space figure; the full breakdown stays in
+     * the tooltip so the value is still available on long-press/desktop. */
+    const short = total > 0 ? freeSpaceLabel(free) : '';
     const detail = total > 0
-      ? formatBytes(used) + ' of ' + formatBytes(total) + ' used'
+      ? formatBytes(free) + ' free of ' + formatBytes(total) + ' (' + formatBytes(used) + ' used)'
       : (count ? count + (count === 1 ? ' download' : ' downloads') : 'Universal Media Downloader');
-    dom.dashboardStorage.textContent = detail;
+    dom.dashboardStorage.textContent = short || detail;
     dom.dashboardStorage.setAttribute('title', detail);
   }
   if (dom.dashboardStorageBar) {
     dom.dashboardStorageBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    dom.dashboardStorageBar.setAttribute('aria-label', total > 0 ? formatBytes(used) + ' of ' + formatBytes(total) + ' used' : 'Device storage used');
     dom.dashboardStorageBar.classList.toggle('is-high', percent >= 90);
   }
   if (dom.dashboardStorageFill) dom.dashboardStorageFill.style.width = percent.toFixed(1) + '%';
@@ -2409,31 +2433,6 @@ async function pasteIntoDownloadInput() {
   }
 }
 
-/* Header clipboard button: read the clipboard, then pre-fill the download
- * sheet so a link can be started with one more tap. */
-async function quickPasteFromHeader() {
-  const raw = await readClipboardText();
-  const url = normalizeClipboardUrl(raw);
-  if (!url) {
-    toast('No link on the clipboard');
-    return;
-  }
-  hideClipboardPrompt();
-  openDownloadSheet();
-  if (!dom.dashboardInput) return;
-  dom.dashboardInput.value = url;
-  window.setTimeout(() => {
-    if (!dom.dashboardInput) return;
-    dom.dashboardInput.focus();
-    try {
-      const end = dom.dashboardInput.value.length;
-      dom.dashboardInput.setSelectionRange(end, end);
-    } catch (error) {
-      /* ignore */
-    }
-  }, 200);
-}
-
 /* ------------------------------------------------------- Clipboard links */
 
 const CLIPBOARD_PROMPT_GAP = 45000;
@@ -2502,6 +2501,7 @@ function acceptClipboardPrompt() {
 }
 
 async function checkClipboardForLink() {
+  if (settings.clipboardMonitoring === false) return;
   if (clipboardCheckBusy || booting) return;
   if (!isDashboardMode || !dashboardActive) return;
   if (overlays.size > 0) return;
@@ -2669,11 +2669,15 @@ async function submitDashboardUrl() {
     return;
   }
   if (dashboardBusy) return;
+  if (settings.wifiOnly && onMobileData()) {
+    toast('Wi-Fi only is on — connect to Wi-Fi to download');
+    return;
+  }
   dashboardBusy = true;
   const button = dom.dashboardForm ? dom.dashboardForm.querySelector('.dl-download-btn') : null;
   if (button) button.disabled = true;
   try {
-    await callPlugin('downloadMedia', { url });
+    await startDownloadWithRetry(url);
     closeDownloadSheet();
     if (input) input.value = '';
     if (!dashboardActive) showDashboard();
@@ -2687,6 +2691,25 @@ async function submitDashboardUrl() {
   } finally {
     dashboardBusy = false;
     if (button) button.disabled = false;
+  }
+}
+
+/* Best-effort network check for the "Wi-Fi only" preference. The WebView only
+ * exposes navigator.connection on some Android versions, so an unknown network
+ * never blocks a download the user asked for. */
+function onMobileData() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return !!(conn && conn.type === 'cellular');
+}
+
+/* Auto-retry: one extra attempt when the native downloader refuses the URL. */
+async function startDownloadWithRetry(url) {
+  try {
+    return await callPlugin('downloadMedia', { url });
+  } catch (error) {
+    if (!settings.autoRetry) throw error;
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+    return callPlugin('downloadMedia', { url });
   }
 }
 
@@ -3897,6 +3920,11 @@ function maxParallelLabel() {
   return String(Number(settings.maxParallelDownloads) || 1);
 }
 
+function connectionsLabel() {
+  const value = Number(settings.connectionsPerFile) || 1;
+  return value + (value === 1 ? ' connection' : ' connections');
+}
+
 /* Two separate settings trees:
  *  - 'app'     → Downloader settings (folder, speed, parallel downloads, theme)
  *  - 'browser' → Browser settings (search engine, desktop mode, JavaScript, data)
@@ -3930,6 +3958,15 @@ function renderSettingsRoot() {
         ${settingRowButton('download', 'Download folder', 'Where saved files are kept', downloadFolderLabel(), 'downloadFolder')}
         ${settingRowButton('sliders', 'Speed limit', 'Cap download bandwidth', speedLimitLabel(), 'speedLimit')}
         ${settingRowButton('download', 'Max parallel downloads', 'Files downloading at once', maxParallelLabel(), 'maxParallel')}
+        ${settingRowButton('sliders', 'Connections per file', 'More connections can download faster', connectionsLabel(), 'connectionsPerFile')}
+      `) +
+      settingSection('Network and reliability', `
+        ${settingRowToggle('wifiOnly', 'Wi-Fi only', 'Pause downloads while on mobile data')}
+        ${settingRowToggle('autoRetry', 'Auto-retry failed downloads', 'Try again when a transfer drops')}
+      `) +
+      settingSection('Notifications', `
+        ${settingRowToggle('downloadNotifications', 'Show download notifications', 'Progress and finished alerts')}
+        ${settingRowToggle('clipboardMonitoring', 'Clipboard monitoring', 'Offer copied links when you return to the app')}
       `) +
       settingSection('Appearance', `
         ${settingRowButton('palette', 'App theme', 'System, light, dark or AMOLED', themeLabel(), 'theme')}
@@ -4129,6 +4166,14 @@ function handleSettingsAction(action) {
         label: count + (count === 1 ? ' download' : ' downloads'),
         desc: count === 3 ? 'Recommended' : ''
       })), maxParallelLabel(), (value) => updateSetting({ maxParallelDownloads: Number(value) || 1 }, { rerender: true, toastMessage: 'Parallel downloads updated' }));
+      break;
+    case 'connectionsPerFile':
+      openChoice('Connections per file', [
+        { value: '1', label: '1 connection', desc: 'Gentlest on the network' },
+        { value: '4', label: '4 connections', desc: 'Balanced' },
+        { value: '8', label: '8 connections', desc: 'Faster on large files' },
+        { value: '16', label: '16 connections', desc: 'Fastest, heaviest on the server' }
+      ], String(Number(settings.connectionsPerFile) || 1), (value) => updateSetting({ connectionsPerFile: Number(value) || 1 }, { rerender: true, toastMessage: 'Connections per file updated' }));
       break;
     case 'density':
       openChoice('Density', [
@@ -4366,8 +4411,14 @@ function attachUiListeners() {
       else openSideDrawer();
     });
   }
-  if (dom.dashboardPasteHeaderBtn) {
-    dom.dashboardPasteHeaderBtn.addEventListener('click', quickPasteFromHeader);
+  if (dom.browserMenuBtn) {
+    /* Browser-mode overflow: the same menu the address bar offers, so New tab,
+     * Bookmarks, History, Downloads, Desktop site and reading mode are one tap
+     * away. The toolbar is hidden in dashboard mode, so this stays browser-only. */
+    dom.browserMenuBtn.addEventListener('click', () => {
+      if (overlays.has('menu')) closeMenu();
+      else openMenu();
+    });
   }
   if (dom.dashboardSearchBtn) {
     dom.dashboardSearchBtn.addEventListener('click', () => setDashboardSearch(!dashboardSearchOpen));

@@ -70,6 +70,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -242,6 +243,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private String cookiesMode = "all";
 
     private boolean uiOverlayActive = false;
+    private boolean snifferEnabled = true;
     private String readingHelperScript = null;
 
     private SharedPreferences prefs;
@@ -252,7 +254,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private PendingDownload pendingDownload;
     private BroadcastReceiver downloadReceiver;
     private static final int MAX_MEDIA_ITEMS = 8;
+    private static final int MAX_REPORTED_MEDIA = 64;
     private final Map<Integer, LinkedHashMap<String, String>> tabMedia = new HashMap<>();
+    /* URLs already reported for a tab. The media map is capped, so without this
+     * an evicted URL would be reported again the next time the page requested
+     * it; on a media-heavy page that cycled detections and JS repaints forever. */
+    private final Map<Integer, LinkedHashSet<String>> reportedMedia = new HashMap<>();
 
     private static class PendingDownload {
         final String url;
@@ -518,13 +525,30 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private void destroyTab(Tab tab) {
         if (tab == null) return;
         forgetTabMedia(tab.id);
-        ViewGroup parent = (ViewGroup) tab.view.getParent();
-        if (parent != null) {
-            parent.removeView(tab.view);
+        try {
+            tab.view.stopLoading();
+        } catch (Exception ignored) {
         }
-        tab.view.stopLoading();
-        tab.view.setWebViewClient(new WebViewClient());
-        tab.view.destroy();
+        try {
+            ViewGroup parent = (ViewGroup) tab.view.getParent();
+            if (parent != null) {
+                parent.removeView(tab.view);
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            tab.view.setOnTouchListener(null);
+            tab.view.setWebChromeClient(null);
+            /* Detach the clients so no late callback can reach a destroyed view. */
+            tab.view.setWebViewClient(new WebViewClient());
+        } catch (Exception ignored) {
+        }
+        try {
+            tab.view.destroy();
+        } catch (Exception ignored) {
+            /* A WebView whose renderer already died can throw here; the tab is
+             * removed from the map either way, so the reference is dropped. */
+        }
     }
 
     private void removeTabInternal(int id, boolean selectNeighbour) {
@@ -642,7 +666,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 tab.title = view.getTitle() == null ? tab.title : view.getTitle();
             }
             view.evaluateJavascript(TAP_STYLE_JS, null);
-            view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
+            if (snifferEnabled) {
+                view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
+            }
             JSObject data = tabState(tab);
             data.put("tabId", tabId);
             data.put("activeTabId", activeTabId);
@@ -685,8 +711,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         @Override
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-            if (tabs.containsKey(tabId)) {
-                removeTabInternal(tabId, true);
+            Activity activity = getActivity();
+            if (activity != null) {
+                activity.runOnUiThread(() -> {
+                    if (tabs.containsKey(tabId)) {
+                        removeTabInternal(tabId, true);
+                    }
+                });
             }
             JSObject data = new JSObject();
             data.put("tabId", tabId);
@@ -752,10 +783,18 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private void detectMediaRequest(int tabId, WebResourceRequest request) {
         try {
+            if (!snifferEnabled) return;
             if (request == null || request.getUrl() == null || request.isForMainFrame()) return;
             final String url = request.getUrl().toString();
             final String kind = mediaKind(url);
             if (kind == null) return;
+            /* Called on a WebView IO thread for every sub-resource. Skip URLs we
+             * already know about before hopping to the UI thread, otherwise a
+             * media-heavy page queues thousands of redundant runnables. */
+            synchronized (tabMedia) {
+                LinkedHashSet<String> seen = reportedMedia.get(tabId);
+                if (seen != null && seen.contains(url)) return;
+            }
             final int mediaTabId = tabId;
             Activity activity = getActivity();
             if (activity == null) return;
@@ -766,6 +805,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private void recordTabMedia(int tabId, String url, String kind, String source) {
         if (tabId < 0 || url == null || url.isEmpty()) return;
+        /* A JS scan already in flight can land after the sniffer was switched off
+         * for the dashboard; drop it instead of reviving the list. */
+        if (!snifferEnabled) return;
         Uri uri = Uri.parse(url);
         String scheme = uri.getScheme();
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
@@ -773,6 +815,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (resolved == null) return;
         boolean added = false;
         synchronized (tabMedia) {
+            LinkedHashSet<String> seen = reportedMedia.get(tabId);
+            if (seen == null) {
+                seen = new LinkedHashSet<>();
+                reportedMedia.put(tabId, seen);
+            }
+            /* Report each URL at most once per navigation, even after it has been
+             * evicted from the capped list. */
+            if (seen.contains(url) || seen.size() >= MAX_REPORTED_MEDIA) return;
+            seen.add(url);
             LinkedHashMap<String, String> items = tabMedia.get(tabId);
             if (items == null) {
                 items = new LinkedHashMap<>();
@@ -815,6 +866,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         boolean had;
         synchronized (tabMedia) {
             had = tabMedia.remove(tabId) != null;
+            reportedMedia.remove(tabId);
         }
         if (!had) return;
         JSObject data = new JSObject();
@@ -827,6 +879,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private void forgetTabMedia(int tabId) {
         synchronized (tabMedia) {
             tabMedia.remove(tabId);
+            reportedMedia.remove(tabId);
         }
     }
 
@@ -1025,18 +1078,26 @@ public class EmbeddedWebViewPlugin extends Plugin {
     public void goBack(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
-            if (tab != null && tab.view.canGoBack()) tab.view.goBack();
+            if (tab != null && tab.view.canGoBack()) {
+                tab.view.goBack();
+                call.resolve(true);
+            } else {
+                call.resolve(false);
+            }
         });
-        call.resolve();
     }
 
     @PluginMethod
     public void goForward(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
-            if (tab != null && tab.view.canGoForward()) tab.view.goForward();
+            if (tab != null && tab.view.canGoForward()) {
+                tab.view.goForward();
+                call.resolve(true);
+            } else {
+                call.resolve(false);
+            }
         });
-        call.resolve();
     }
 
     @PluginMethod
@@ -1088,6 +1149,18 @@ public class EmbeddedWebViewPlugin extends Plugin {
         boolean visible = call.getBoolean("visible", true);
         browserVisible = visible;
         getActivity().runOnUiThread(this::applyActiveVisibility);
+        call.resolve();
+    }
+
+    /**
+     * Enables/disables the media sniffer (detects video/audio on pages). When
+     * disabled the sniffer no longer records media for any tab and no
+     * {mediaDetected, mediaCleared} events are emitted. Turned off when the
+     * user is on the dashboard to save battery.
+     */
+    @PluginMethod
+    public void setSnifferEnabled(PluginCall call) {
+        snifferEnabled = call.getBoolean("enabled", true);
         call.resolve();
     }
 

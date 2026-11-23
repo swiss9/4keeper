@@ -966,9 +966,26 @@ function setNativeVisible(visible) {
   }
 }
 
+let mediaSnifferState = null;
+
+function setMediaSnifferActive(active) {
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.setSnifferEnabled !== 'function') return;
+  if (mediaSnifferState === active) return;
+  mediaSnifferState = active;
+  try {
+    Promise.resolve(plugin.setSnifferEnabled({ enabled: active })).catch(() => {
+      mediaSnifferState = null;
+    });
+  } catch (error) {
+    mediaSnifferState = null;
+  }
+}
+
 /* Dashboard mode always hides the native WebView; browser mode brings it back
  * only when the active tab actually holds a page. */
 function hideNativeWebView() {
+  browserShowToken++;
   nativeVisibleState = false;
   setNativeVisible(false);
 }
@@ -981,13 +998,26 @@ function setNodeVisible(node, visible) {
   if (visible) node.removeAttribute('aria-hidden');
 }
 
+let browserShowToken = 0;
+
 function showNativeWebView() {
   nativeVisibleState = true;
+  const token = ++browserShowToken;
   /* Apply fresh bounds before the page view is shown. Showing a page view that
    * still carries stale (taller) metrics is what used to let it cover the shell's
    * bottom navigation and swallow Home taps. */
   mountBrowser().finally(() => {
-    if (nativeVisibleState === true && !dashboardActive) setNativeVisible(true);
+    if (token !== browserShowToken) return;
+    if (nativeVisibleState !== true || dashboardActive) return;
+    if (!lastBoundsKey) {
+      /* mountBrowser clears the bounds key when the native mount was rejected.
+       * Showing the page anyway would put it back at stale metrics, so hand the
+       * decision back to syncNativeVisibility and let it retry on the next tick. */
+      nativeVisibleState = false;
+      syncNativeVisibility();
+      return;
+    }
+    setNativeVisible(true);
   });
 }
 
@@ -1179,9 +1209,11 @@ function openTabSheet() {
   renderTabs();
   refreshTabMedia();
   syncNativeVisibility();
+  setBottomNavActive('tabs');
+  if (dom.tabsBtn) dom.tabsBtn.setAttribute('aria-expanded', 'true');
 
   const refreshSheet = () => {
-    if (overlays.has('tabs')) renderTabs();
+    scheduleTabsRender();
   };
   if (!tabsReady) {
     Promise.resolve(bootPromise).then(refreshSheet).catch(() => {});
@@ -1191,7 +1223,11 @@ function openTabSheet() {
 }
 
 function closeTabSheet() {
+  if (dom.tabsBtn) dom.tabsBtn.setAttribute('aria-expanded', 'false');
+  if (!overlays.has('tabs')) return;
   closeSheet('tabs', dom.tabSheet, dom.tabSheetBackdrop);
+  /* Hand the active indicator back to the mode the user is actually in. */
+  setBottomNavActive(isDashboardMode ? 'dashboard' : 'browser');
 }
 
 function openMenu() {
@@ -1690,6 +1726,8 @@ function noteTabMedia(tabId, url, kind) {
   const key = String(url);
   if (entry[key]) return false;
   entry[key] = kind || 'video';
+  /* Any live detection is newer than a snapshot that may still be resolving. */
+  tabMediaRequest++;
   return true;
 }
 
@@ -1698,11 +1736,17 @@ function dropTabMedia(tabId) {
   delete tabMedia[tabId];
 }
 
+let tabMediaRequest = 0;
+
 async function refreshTabMedia() {
   const plugin = getPlugin();
   if (!plugin || typeof plugin.getTabMedia !== 'function') return;
+  const request = ++tabMediaRequest;
   try {
     const result = await plugin.getTabMedia();
+    /* A live mediaDetected event may have landed while this snapshot was in
+     * flight; a later request or newer event wins over this stale list. */
+    if (request !== tabMediaRequest) return;
     const items = Array.isArray(result && result.items) ? result.items : [];
     tabMedia = {};
     items.forEach((item) => noteTabMedia(Number(item && item.tabId), item && item.url, item && item.kind));
@@ -1728,7 +1772,7 @@ function rebuildTabDownloadIndex() {
   });
   tabDownloadIndex = next;
   updateDownloadsIndicator();
-  if (overlays.has('tabs')) renderTabs();
+  scheduleTabsRender();
 }
 
 function tabDownloadBadgesMarkup(tabId) {
@@ -1815,10 +1859,25 @@ function toggleTabPin(id) {
   saveSession();
 }
 
+/* Page events (title, favicon, load, media) arrive once per tab. Rebuilding the
+ * whole grid for each of them is what made a 20-tab sheet stutter, so collapse
+ * bursts into one paint per frame while the sheet is open. */
+let tabsRenderFrame = 0;
+let tabsMarkupCache = '';
+
+function scheduleTabsRender() {
+  if (!overlays.has('tabs') || tabsRenderFrame) return;
+  tabsRenderFrame = window.requestAnimationFrame(() => {
+    tabsRenderFrame = 0;
+    if (overlays.has('tabs')) renderTabs();
+  });
+}
+
 function renderTabs() {
   if (!dom.tabsList) return;
   updateTabBadge();
   updateDownloadsIndicator();
+
   const hasTabs = tabs.length > 0;
   dom.tabsEmpty.classList.toggle('hidden', hasTabs);
 
@@ -1845,10 +1904,23 @@ function renderTabs() {
       html = '';
     }
   }
+  /* Repainting identical markup throws away focus and long-press state and
+   * forces a full style/layout pass on every page-title or media event, which
+   * is what made a 20-tab sheet stutter. */
+  if (html === tabsMarkupCache) return;
+  tabsMarkupCache = html;
   dom.tabsList.innerHTML = html;
 }
 
+/* Every tab is a live native WebView with its own document, so an unbounded tab
+ * count is the fastest way to an out-of-memory kill on a mid-range phone. */
+const MAX_TABS = 30;
+
 async function createTabWithUrl(url, activate) {
+  if (Array.isArray(tabs) && tabs.length >= MAX_TABS) {
+    toast('Tab limit reached (' + MAX_TABS + '). Close a tab first.');
+    return;
+  }
   await mountBrowser();
   if (activate !== false) leaveDashboard();
   const target = buildHomeUrl(url || getHomePage());
@@ -1937,6 +2009,10 @@ async function goForward() {
 
 function dashboardMediaItems() {
   const items = [];
+  /* The same stream is commonly requested by several tabs (and by both the
+   * network sniffer and the page scan). Listing it once keeps the sheet stable
+   * instead of stacking identical rows when five tabs find the same file. */
+  const seen = new Set();
   Object.keys(tabMedia).forEach((id) => {
     const tabId = Number(id);
     if (!Number.isFinite(tabId) || tabId < 0) return;
@@ -1944,6 +2020,8 @@ function dashboardMediaItems() {
     if (!entry || typeof entry !== 'object') return;
     const tab = tabs.find((candidate) => candidate && candidate.id === tabId) || null;
     Object.keys(entry).forEach((url) => {
+      if (seen.has(url)) return;
+      seen.add(url);
       items.push({
         url,
         kind: entry[url] || 'video',
@@ -1956,16 +2034,34 @@ function dashboardMediaItems() {
   return items;
 }
 
+/* Media rows are addressed by index, so the exact list that was painted must be
+ * kept: rebuilds happen on every detection and a stale index would otherwise
+ * download a different file than the row the user tapped. */
+let renderedMediaItems = [];
+let dashboardMediaFrame = 0;
+const MAX_DASHBOARD_MEDIA_ROWS = 40;
+
+function scheduleDashboardMediaRender() {
+  if (dashboardMediaFrame) return;
+  dashboardMediaFrame = window.requestAnimationFrame(() => {
+    dashboardMediaFrame = 0;
+    renderDashboardMedia();
+  });
+}
+
 function renderDashboardMedia() {
   if (!dom.dashboardMedia || !dom.dashboardMediaList) return;
   const items = dashboardMediaItems();
+  const shown = items.slice(0, MAX_DASHBOARD_MEDIA_ROWS);
+  renderedMediaItems = shown;
   if (dom.dashboardMediaCount) dom.dashboardMediaCount.textContent = String(items.length);
   dom.dashboardMedia.classList.toggle('hidden', items.length === 0);
   if (!items.length) {
     dom.dashboardMediaList.innerHTML = '';
     return;
   }
-  dom.dashboardMediaList.innerHTML = items.map((item, index) => {
+  const overflow = items.length - shown.length;
+  dom.dashboardMediaList.innerHTML = shown.map((item, index) => {
     const isAudio = /audio/i.test(item.kind);
     const label = isAudio ? 'AUDIO' : 'VIDEO';
     return `
@@ -1977,7 +2073,9 @@ function renderDashboardMedia() {
         </div>
         <button class="dashboard-media-download" type="button" data-media-download="${index}">Download</button>
       </div>`;
-  }).join('');
+  }).join('') + (overflow > 0
+    ? `<p class="dashboard-media-more">+${overflow} more on other tabs</p>`
+    : '');
 }
 
 const DASHBOARD_CATEGORY_ICONS = {
@@ -2523,7 +2621,7 @@ async function checkClipboardForLink() {
 }
 
 async function downloadDashboardMedia(index, button) {
-  const item = dashboardMediaItems()[index];
+  const item = renderedMediaItems[index] || dashboardMediaItems()[index];
   if (!item) return;
   const label = button ? button.textContent : '';
   if (button) {
@@ -2554,6 +2652,7 @@ function setBottomNavActive(target) {
   const buttons = {
     dashboard: dom.navDashboardBtn,
     browser: dom.navBrowserBtn,
+    tabs: dom.tabsBtn,
     settings: dom.navSettingsBtn
   };
   Object.keys(buttons).forEach((key) => {
@@ -2614,6 +2713,15 @@ function setAppMode(mode) {
     const tab = activeTab();
     if (tab && isHttpUrl(tab.url)) showNativeWebView();
   }
+
+  /* The sniffer is native-side work: switch it off while the dashboard owns the
+   * screen so hidden tabs stop scanning, and pull a fresh snapshot when the
+   * browser comes back. */
+  setMediaSnifferActive(!dashboard);
+  /* Always re-pull the native snapshot. Entering the dashboard switches the
+   * sniffer off, so anything detected in the last moments before the switch
+   * would otherwise never reach the list until the user browsed again. */
+  refreshTabMedia();
 
   syncNativeVisibility();
   return isDashboardMode;
@@ -2739,6 +2847,8 @@ async function switchTab(id) {
   await refreshTabs();
   syncActiveTabUi();
   syncNav();
+  /* The active tab changed: its media list decides the sniffer badges. */
+  refreshTabMedia();
   setLoading(false);
   saveSession();
 }
@@ -2759,10 +2869,15 @@ async function closeTab(id) {
   const meta = getTabMeta(id);
   delete meta.pinned;
   if (Object.keys(meta).length === 0) delete tabMeta[id];
-  else Store.save('tabMeta');
+  /* Persist both branches: an emptied entry must disappear from storage too. */
+  Store.save('tabMeta');
   await refreshTabs();
   if (!tabs.length) {
+    /* Replacing the last tab must not drag the user out of the dashboard, which
+     * is what createTabWithUrl() does whenever it activates a tab. */
+    const keepDashboard = isDashboardMode;
     await createTabWithUrl(getHomePage(), true);
+    if (keepDashboard) setAppMode('dashboard');
   }
   syncActiveTabUi();
   syncNav();
@@ -4123,12 +4238,15 @@ function rerenderSettings() {
 
 function openSettingsScreen(section, view) {
   if (view === 'app' || view === 'browser') settingsView = view;
+  /* Settings is a full-screen destination. Leaving a sheet (tabs, download,
+   * menu) open underneath put two overlays on the back stack and let the
+   * bottom-nav indicator and the visible surface disagree. */
+  closeOtherSheets(null);
+  closeSideDrawer();
   if (section) showSettingsSection(section);
   else renderSettingsRoot();
   openScreen('settings', dom.settingsScreen);
   setBottomNavActive('settings');
-  closeMenu();
-  closeSideDrawer();
 }
 
 function closeSettingsScreen() {
@@ -4520,6 +4638,18 @@ function attachUiListeners() {
   if (dom.downloadFab) dom.downloadFab.addEventListener('click', openDownloadSheet);
   if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
   if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
+  /* The backdrop covers the screen, but it is a separate element that can be
+   * scrolled out from under the keyboard on some devices and it is not rendered
+   * for every sheet. A capture-phase guard on the document guarantees that any
+   * tap outside the sheet dismisses it. */
+  document.addEventListener('pointerdown', (event) => {
+    if (!overlays.has('downloadSheet')) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (dom.downloadSheet && dom.downloadSheet.contains(target)) return;
+    if (dom.downloadFab && dom.downloadFab.contains(target)) return;
+    closeDownloadSheet();
+  }, true);
   if (dom.downloadPasteBtn) dom.downloadPasteBtn.addEventListener('click', pasteIntoDownloadInput);
   if (dom.dashboardMediaList) {
     dom.dashboardMediaList.addEventListener('click', (event) => {
@@ -4860,7 +4990,7 @@ function attachNativeListeners() {
     adoptNativeActiveTab(data);
     updateTabMeta(data.tabId, { url: data.url });
     if (!isActive(data)) {
-      if (overlays.has('tabs')) renderTabs();
+      scheduleTabsRender();
       return;
     }
     currentUrl = data.url || currentUrl;
@@ -4888,7 +5018,7 @@ function attachNativeListeners() {
       canGoForward: data.canGoForward
     });
     if (!isActive(data)) {
-      if (overlays.has('tabs')) renderTabs();
+      scheduleTabsRender();
       scheduleSessionSave();
       return;
     }
@@ -4905,7 +5035,7 @@ function attachNativeListeners() {
     addHistoryEntry(currentUrl, currentTitle);
     updateMenuBookmark();
     updateTabBadge();
-    if (overlays.has('tabs')) renderTabs();
+    scheduleTabsRender();
     scheduleSessionSave();
     if (overlays.has('siteInfo')) renderSiteInfo();
   });
@@ -4936,7 +5066,7 @@ function attachNativeListeners() {
       document.title = currentTitle ? currentTitle + ' · 4Keeper' : '4Keeper';
       if (overlays.has('siteInfo')) renderSiteInfo();
     }
-    if (overlays.has('tabs')) renderTabs();
+    scheduleTabsRender();
     scheduleSessionSave();
   });
 
@@ -4950,7 +5080,7 @@ function attachNativeListeners() {
       hosts.slice(0, hosts.length - 200).forEach((key) => delete favicons[key]);
     }
     Store.save('favicons');
-    if (overlays.has('tabs')) renderTabs();
+    scheduleTabsRender();
     if (overlays.has('history')) renderHistory();
     if (overlays.has('bookmarks')) renderBookmarks();
   });
@@ -4971,9 +5101,12 @@ function attachNativeListeners() {
 
   listen('tabCrashed', () => {
     toast('A tab stopped responding and was closed');
-    refreshTabs().then(() => {
-      if (!tabs.length) createTabWithUrl(getHomePage(), true);
-    });
+    refreshTabs()
+      .then(() => {
+        if (!tabs.length) return createTabWithUrl(getHomePage(), true);
+        return null;
+      })
+      .catch(() => {});
   });
 
   listen('mediaDetected', (data) => {
@@ -4982,9 +5115,11 @@ function attachNativeListeners() {
     if (!Number.isFinite(tabId) || tabId < 0) return;
     if (!noteTabMedia(tabId, data.url, data.kind)) return;
     updateDownloadsIndicator();
-    if (overlays.has('tabs')) renderTabs();
+    scheduleTabsRender();
     if (dashboardActive) {
-      renderDashboardMedia();
+      /* Detections arrive in bursts (one per media request); coalesce them into
+       * a single repaint per frame instead of rebuilding the list each time. */
+      scheduleDashboardMediaRender();
     } else if (!overlays.size && nativeVisibleState) {
       announceTabMedia(tabId);
     }
@@ -4996,8 +5131,8 @@ function attachNativeListeners() {
     if (!Number.isFinite(tabId)) return;
     dropTabMedia(tabId);
     updateDownloadsIndicator();
-    if (overlays.has('tabs')) renderTabs();
-    if (dashboardActive) renderDashboardMedia();
+    scheduleTabsRender();
+    if (dashboardActive) scheduleDashboardMediaRender();
   });
 
   listen('downloadStarted', (data) => {
@@ -5090,6 +5225,12 @@ function handleBack() {
     closeMenu();
     return true;
   }
+  if (overlays.has('drawer')) {
+    /* The side drawer is a full-height panel on top of the dashboard: Back must
+     * close it instead of minimising the app underneath it. */
+    closeSideDrawer();
+    return true;
+  }
   if (overlays.has('siteInfo')) {
     closeSiteInfo();
     return true;
@@ -5105,13 +5246,54 @@ function handleBack() {
     return true;
   }
   /* The dashboard has no page behind it, so Back must not steer the hidden
-   * WebView; let the host app handle it instead. */
+   * WebView; the caller minimises the app instead. */
   if (isDashboardMode) return false;
   if (navCanBack) {
     goBack();
     return true;
   }
   return false;
+}
+
+/* navCanBack only ever describes the last pageLoaded event, so it misses
+ * in-page history pushes (SPA routes, hash changes) and would make a single
+ * Back press minimise the app while the page still has history. Ask the native
+ * layer instead, behind a re-entrancy guard: holding Back used to queue one
+ * getNavigationState()/goBack() pair per press. */
+let backBusy = false;
+
+async function backInBrowser() {
+  if (isDashboardMode || booting) return false;
+  /* Holding down Back used to queue one getNavigationState()/goBack() pair per
+   * press, so a single intent could skip several pages of history. */
+  if (backBusy) return true;
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.getNavigationState !== 'function') return false;
+  backBusy = true;
+  try {
+    const state = await plugin.getNavigationState();
+    if (!state || state.canGoBack !== true) return false;
+    const moved = await callPlugin('goBack');
+    setLoading(true);
+    window.setTimeout(syncNav, 250);
+    return moved !== false;
+  } catch (error) {
+    return false;
+  } finally {
+    backBusy = false;
+  }
+}
+
+async function minimizeApp() {
+  try {
+    if (App && typeof App.minimizeApp === 'function') {
+      await App.minimizeApp();
+      return;
+    }
+  } catch (error) {
+    /* fall back to a normal exit below */
+  }
+  await exitApp();
 }
 
 async function exitApp() {
@@ -5218,7 +5400,20 @@ async function boot() {
 
   if (App && typeof App.addListener === 'function') {
     App.addListener('backButton', () => {
-      if (!handleBack()) exitApp();
+      /* Back must never hard-kill the task. Overlays close first, the dashboard
+       * sends the app to the background, and a page only leaves once it has no
+       * history left to go back to. */
+      if (handleBack()) return;
+      if (isDashboardMode) {
+        minimizeApp();
+        return;
+      }
+      backInBrowser()
+        .then((moved) => {
+          if (!moved) return minimizeApp();
+          return null;
+        })
+        .catch(() => minimizeApp());
     });
     App.addListener('appStateChange', (state) => {
       if (!state || state.isActive === false) {
@@ -5232,7 +5427,9 @@ async function boot() {
       pageBehindState = false;
       syncNativeVisibility();
       window.setTimeout(() => {
-        if (overlays.size === 0) mountBrowser(true);
+        /* Never mount the page view with dashboard-sized metrics. */
+        if (overlays.size === 0 && !dashboardActive) mountBrowser(true);
+        else refreshTabMedia();
       }, 160);
       /* Give Android a moment to finish the resume transition before touching
        * the clipboard, otherwise the read can be denied as background access. */
@@ -5253,7 +5450,7 @@ async function boot() {
       pageBehindState = false;
       syncNativeVisibility();
       window.setTimeout(() => {
-        if (overlays.size === 0) mountBrowser();
+        if (overlays.size === 0 && !dashboardActive) mountBrowser();
       }, 160);
       window.setTimeout(checkClipboardForLink, 300);
     }

@@ -118,6 +118,7 @@ const ICONS = {
   bookmark: '<path d="M6 3h12v18l-6-4.5L6 21Z"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/>',
   pause: '<rect x="7" y="5" width="4" height="14" rx="1.2"/><rect x="13" y="5" width="4" height="14" rx="1.2"/>',
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/>',
   play: '<path d="M8 5.5v13l11-6.5Z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
   shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6Z"/>',
@@ -174,6 +175,8 @@ let clipboardPromptUrl = '';
 let clipboardLastPrompt = '';
 let clipboardLastPromptAt = 0;
 let clipboardCheckBusy = false;
+let pendingDownloadPrompt = null;
+let contextMenuTarget = null;
 let tabMedia = {};
 let tabDownloadIndex = {};
 let mediaToastAt = 0;
@@ -249,6 +252,13 @@ const dom = {
   downloadSheetBackdrop: $('downloadSheetBackdrop'),
   downloadSheetClose: $('downloadSheetClose'),
   downloadPasteBtn: $('downloadPasteBtn'),
+  downloadPrompt: $('downloadPrompt'),
+  downloadPromptBackdrop: $('downloadPromptBackdrop'),
+  downloadPromptName: $('downloadPromptName'),
+  downloadPromptMeta: $('downloadPromptMeta'),
+  downloadPromptCancel: $('downloadPromptCancel'),
+  downloadPromptConfirm: $('downloadPromptConfirm'),
+  contextMenu: $('contextMenu'),
   dashboardMedia: $('dashboardMedia'),
   dashboardMediaList: $('dashboardMediaList'),
   dashboardMediaCount: $('dashboardMediaCount'),
@@ -2175,14 +2185,13 @@ function dashboardMetaText(item, group) {
   const bytes = Number(item.bytes) || 0;
   const total = Number(item.totalBytes) || 0;
   if (group === 'downloading') {
+    /* Live row: speed first, then the full file size (the bar next to it owns
+     * the percentage), so the row answers "how fast" and "how big" at a glance. */
     const speed = formatSpeed(dashboardSpeedFor(item));
     const parts = [];
-    if (speed) parts.push(speed);
-    if (total > 0) {
-      parts.push(dashboardPercent(item) + '% · ' + formatBytes(bytes) + ' of ' + formatBytes(total));
-    } else {
-      parts.push(bytes > 0 ? formatBytes(bytes) + ' downloaded' : 'Starting…');
-    }
+    parts.push(speed || 'Starting…');
+    if (total > 0) parts.push(formatBytes(total));
+    else if (bytes > 0) parts.push(formatBytes(bytes) + ' downloaded');
     return parts.join(' · ');
   }
   if (group === 'finished') {
@@ -2322,15 +2331,17 @@ function dashboardRowMarkup(item) {
         </div>
         ${
           showProgress
-            ? `<div class="dl-progress" data-dl-progress role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div>`
+            ? `<div class="dl-progress-row">
+                 <div class="dl-progress" data-dl-progress role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div>
+                 <span class="dl-progress-pct" data-dl-pct>${percent}%</span>
+               </div>`
             : ''
         }
       </div>
       <div class="dl-row-actions">
         ${
           running
-            ? `<button class="dl-row-btn" type="button" data-dashboard-pause="${id}" aria-label="Pause download" aria-pressed="false">${svgIcon('pause', 'icon icon-xs')}</button>
-               <button class="dl-row-btn is-danger" type="button" data-dashboard-cancel="${id}" aria-label="Cancel download">${svgIcon('close', 'icon icon-xs')}</button>`
+            ? `<button class="dl-row-btn is-danger" type="button" data-dashboard-cancel="${id}" aria-label="Stop download">${svgIcon('stop', 'icon icon-xs')}</button>`
             : `<button class="dl-row-btn" type="button" data-dashboard-open="${id}" aria-label="Open download"${canOpen ? '' : ' disabled'}>${svgIcon('external', 'icon icon-xs')}</button>
                <button class="dl-row-btn" type="button" data-dashboard-remove="${id}" aria-label="Remove download">${svgIcon('trash', 'icon icon-xs')}</button>`
         }
@@ -2449,13 +2460,18 @@ function updateDashboardProgress(data) {
     return;
   }
   const meta = row.querySelector('[data-dl-meta]');
-  if (meta) meta.textContent = item.exists === false ? 'File removed' : dashboardMetaText(item, group);
+  if (meta) {
+    updateDashboardSpeeds();
+    meta.textContent = item.exists === false ? 'File removed' : dashboardMetaText(item, group);
+  }
   const bar = row.querySelector('[data-dl-progress]');
   if (bar) {
     const percent = dashboardPercent(item);
     bar.setAttribute('aria-valuenow', String(percent));
     const fill = bar.firstElementChild;
     if (fill) fill.style.width = percent + '%';
+    const pct = row.querySelector('[data-dl-pct]');
+    if (pct) pct.textContent = percent + '%';
   }
 }
 
@@ -2522,6 +2538,239 @@ function closeDownloadSheet() {
   if (dom.downloadFab) dom.downloadFab.setAttribute('aria-expanded', 'false');
   if (dom.dashboardInput) dom.dashboardInput.blur();
   if (wasOpen) syncNativeVisibility();
+}
+
+/* ------------------------------------------------- Download confirmation */
+
+/* Native guesses the filename, but a bare URL with no path segment needs a
+ * fallback so the sheet never shows an empty name. */
+function filenameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const last = parsed.pathname.split('/').filter(Boolean).pop();
+    if (!last) return 'download';
+    const decoded = decodeURIComponent(last);
+    return decoded || 'download';
+  } catch (error) {
+    return 'download';
+  }
+}
+
+/* Raised by native for a tapped link (shouldOverrideUrlLoading) or a page that
+ * starts a download (DownloadListener). Nothing is downloaded until the user
+ * confirms here, and the size comes from a native HEAD probe. */
+function showDownloadPrompt(data) {
+  const url = String((data && data.url) || '');
+  if (!isHttpUrl(url)) return;
+  const filename = String((data && data.filename) || '') || filenameFromUrl(url);
+  const size = Number(data && data.size) || 0;
+  const mime = String((data && data.mime) || '');
+  pendingDownloadPrompt = {
+    url,
+    filename,
+    mime,
+    userAgent: String((data && data.userAgent) || ''),
+    tabId: Number.isFinite(Number(data && data.tabId)) ? Number(data.tabId) : activeTabId
+  };
+  if (dom.downloadPromptName) dom.downloadPromptName.textContent = filename;
+  if (dom.downloadPromptMeta) {
+    const parts = [size > 0 ? formatBytes(size) : 'Size unknown'];
+    const host = hostOf(url);
+    if (host) parts.push(host);
+    if (mime) {
+      const label = mime.split('/').pop().split(';')[0].trim().toUpperCase();
+      if (label && label !== '*') parts.push(label);
+    }
+    dom.downloadPromptMeta.textContent = parts.join(' · ');
+  }
+  closeContextMenu();
+  overlays.add('downloadPrompt');
+  if (dom.downloadPrompt) {
+    dom.downloadPrompt.classList.add('open');
+    dom.downloadPrompt.setAttribute('aria-hidden', 'false');
+  }
+  if (dom.downloadPromptBackdrop) dom.downloadPromptBackdrop.classList.add('open');
+  if (dom.downloadPromptConfirm) dom.downloadPromptConfirm.disabled = false;
+  syncNativeVisibility();
+}
+
+function closeDownloadPrompt() {
+  const wasOpen = overlays.has('downloadPrompt');
+  overlays.delete('downloadPrompt');
+  pendingDownloadPrompt = null;
+  if (dom.downloadPrompt) {
+    dom.downloadPrompt.classList.remove('open');
+    dom.downloadPrompt.setAttribute('aria-hidden', 'true');
+  }
+  if (dom.downloadPromptBackdrop) dom.downloadPromptBackdrop.classList.remove('open');
+  if (wasOpen) syncNativeVisibility();
+}
+
+async function confirmDownloadPrompt() {
+  const pending = pendingDownloadPrompt;
+  if (!pending) return;
+  if (dom.downloadPromptConfirm) dom.downloadPromptConfirm.disabled = true;
+  closeDownloadPrompt();
+  try {
+    await callPlugin('startDownload', {
+      url: pending.url,
+      filename: pending.filename,
+      mime: pending.mime,
+      userAgent: pending.userAgent,
+      tabId: pending.tabId
+    });
+    toast('Download started');
+    if (dashboardActive) refreshDashboardDownloads();
+  } catch (error) {
+    toast('Could not start the download');
+  }
+}
+
+/* ------------------------------------------------------ Long-press menu */
+
+async function copyTextToClipboard(text, message) {
+  const value = String(text || '');
+  if (!value) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const area = document.createElement('textarea');
+      area.value = value;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    }
+    toast(message || 'Copied');
+  } catch (error) {
+    toast('Could not copy');
+  }
+}
+
+async function downloadFromContextMenu(url) {
+  try {
+    await callPlugin('startDownload', {
+      url,
+      filename: filenameFromUrl(url),
+      tabId: activeTabId
+    });
+    toast('Download started');
+    if (dashboardActive) refreshDashboardDownloads();
+  } catch (error) {
+    toast('Could not start the download');
+  }
+}
+
+/* Builds the menu from what the page reported, so a text link never shows
+ * image actions and vice versa. */
+function showContextMenu(data) {
+  const linkUrl = String((data && data.linkUrl) || '');
+  const imageUrl = String((data && data.imageUrl) || '');
+  const videoUrl = String((data && data.videoUrl) || '');
+  const label = String((data && data.text) || '').trim();
+  if (!linkUrl && !imageUrl && !videoUrl) return;
+
+  const items = [];
+  const add = (action, icon, text) => items.push({ action, icon, text });
+  if (linkUrl && isHttpUrl(linkUrl)) {
+    add('open-link', 'newtab', 'Open in new tab');
+    add('copy-link', 'link', 'Copy link');
+    add('download-link', 'download', 'Download link');
+  }
+  if (imageUrl && isHttpUrl(imageUrl)) {
+    if (items.length) items.push({ sep: true });
+    add('open-image', 'external', 'Open image in new tab');
+    add('copy-image', 'link', 'Copy image address');
+    add('download-image', 'download', 'Download image');
+  }
+  if (videoUrl && isHttpUrl(videoUrl) && !imageUrl) {
+    if (items.length) items.push({ sep: true });
+    add('download-video', 'download', 'Download video');
+  }
+  if (!items.length) return;
+
+  const menu = dom.contextMenu;
+  if (!menu) return;
+  contextMenuTarget = {
+    linkUrl,
+    imageUrl,
+    videoUrl,
+    tabId: Number.isFinite(Number(data && data.tabId)) ? Number(data.tabId) : activeTabId
+  };
+
+  const heading = label || hostOf(linkUrl) || hostOf(imageUrl) || hostOf(videoUrl);
+  menu.innerHTML =
+    (heading ? '<div class="ctx-title">' + escapeHtml(heading) + '</div>' : '') +
+    items
+      .map((item) =>
+        item.sep
+          ? '<div class="ctx-sep" role="separator"></div>'
+          : '<button class="ctx-item" type="button" role="menuitem" data-ctx-action="' +
+            item.action +
+            '">' +
+            svgIcon(item.icon, 'icon') +
+            '<span>' +
+            escapeHtml(item.text) +
+            '</span></button>'
+      )
+      .join('');
+
+  overlays.add('contextMenu');
+  syncNativeVisibility();
+
+  /* Position at the long-press point and clamp inside the viewport. Page and
+   * app coordinates share the same full-screen viewport on Android. */
+  menu.hidden = false;
+  menu.style.visibility = 'hidden';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  const rect = menu.getBoundingClientRect();
+  const margin = 8;
+  const tapX = Number(data && data.x) || 0;
+  const tapY = Number(data && data.y) || 0;
+  let left = tapX > 0 ? tapX + 6 : (window.innerWidth - rect.width) / 2;
+  let top = tapY > 0 ? tapY + 6 : window.innerHeight - rect.height - 96;
+  left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+  top = Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin));
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(top) + 'px';
+  menu.style.visibility = '';
+}
+
+function closeContextMenu() {
+  const wasOpen = overlays.has('contextMenu');
+  overlays.delete('contextMenu');
+  contextMenuTarget = null;
+  if (dom.contextMenu) {
+    dom.contextMenu.hidden = true;
+    dom.contextMenu.innerHTML = '';
+  }
+  if (wasOpen) syncNativeVisibility();
+}
+
+async function handleContextMenuAction(action) {
+  const target = contextMenuTarget;
+  if (!target) return;
+  closeContextMenu();
+  if (action === 'open-link') {
+    createTabWithUrl(target.linkUrl, true);
+  } else if (action === 'copy-link') {
+    copyTextToClipboard(target.linkUrl, 'Link copied');
+  } else if (action === 'download-link') {
+    downloadFromContextMenu(target.linkUrl);
+  } else if (action === 'open-image') {
+    createTabWithUrl(target.imageUrl, true);
+  } else if (action === 'copy-image') {
+    copyTextToClipboard(target.imageUrl, 'Image address copied');
+  } else if (action === 'download-image') {
+    downloadFromContextMenu(target.imageUrl);
+  } else if (action === 'download-video') {
+    downloadFromContextMenu(target.videoUrl);
+  }
 }
 
 async function pasteIntoDownloadInput() {
@@ -3879,32 +4128,20 @@ async function removeDownloadFile(id) {
   loadDownloads();
 }
 
-/* Android's DownloadManager has no pause API; if a future plugin version
- * exposes pauseDownload the button uses it, otherwise it says so instead of
- * faking a paused state. */
-async function togglePauseDownload(id, button) {
-  const plugin = getPlugin();
-  if (!plugin || typeof plugin.pauseDownload !== 'function') {
-    toast("Pause isn't supported by Android's download manager");
-    return;
-  }
-  const paused = button && button.getAttribute('aria-pressed') === 'true';
-  try {
-    await callPlugin('pauseDownload', { id, paused: !paused });
-    if (button) button.setAttribute('aria-pressed', paused ? 'false' : 'true');
-    toast(paused ? 'Download resumed' : 'Download paused');
-    refreshDashboardDownloads();
-  } catch (error) {
-    toast(paused ? 'Could not resume this download' : 'Could not pause this download');
-  }
+/* The multi-threaded engine (MultiThreadDownloader) has no pause/resume: its
+ * chunk workers write straight into the target file. Stopping is the honest
+ * action, and it goes through removeDownload -> MultiThreadDownloader.cancel(),
+ * never through Android's deprecated DownloadManager. */
+function stopDashboardDownload(id) {
+  cancelDashboardDownload(id);
 }
 
 function cancelDashboardDownload(id) {
   openDialog({
-    title: 'Cancel download?',
-    message: 'The partial file will be deleted.',
-    confirmLabel: 'Cancel download',
-    cancelLabel: 'Keep',
+    title: 'Stop this download?',
+    message: 'The transfer stops and the partial file is deleted.',
+    confirmLabel: 'Stop download',
+    cancelLabel: 'Keep downloading',
     destructive: true,
     onConfirm: async () => {
       await removeDownloadFile(id);
@@ -4597,7 +4834,9 @@ function attachUiListeners() {
       }
       const pauseButton = event.target.closest('[data-dashboard-pause]');
       if (pauseButton) {
-        togglePauseDownload(Number(pauseButton.getAttribute('data-dashboard-pause')), pauseButton);
+        /* Legacy markup from an older render: route it to the same stop path
+         * instead of the removed pause handler. */
+        stopDashboardDownload(Number(pauseButton.getAttribute('data-dashboard-pause')));
         return;
       }
       const cancelButton = event.target.closest('[data-dashboard-cancel]');
@@ -4651,6 +4890,16 @@ function attachUiListeners() {
   if (dom.downloadFab) dom.downloadFab.addEventListener('click', openDownloadSheet);
   if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
   if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
+  if (dom.downloadPromptCancel) dom.downloadPromptCancel.addEventListener('click', closeDownloadPrompt);
+  if (dom.downloadPromptConfirm) dom.downloadPromptConfirm.addEventListener('click', confirmDownloadPrompt);
+  if (dom.downloadPromptBackdrop) dom.downloadPromptBackdrop.addEventListener('click', closeDownloadPrompt);
+  if (dom.contextMenu) {
+    dom.contextMenu.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-ctx-action]');
+      if (!button) return;
+      handleContextMenuAction(button.getAttribute('data-ctx-action'));
+    });
+  }
   /* The backdrop covers the screen, but it is a separate element that can be
    * scrolled out from under the keyboard on some devices and it is not rendered
    * for every sheet. A capture-phase guard on the document guarantees that any
@@ -4663,6 +4912,18 @@ function attachUiListeners() {
     if (dom.downloadFab && dom.downloadFab.contains(target)) return;
     closeDownloadSheet();
   }, true);
+  /* Tapping anywhere outside the long-press menu dismisses it, exactly like a
+   * system context menu. Taps on the menu itself must survive this guard. */
+  document.addEventListener('pointerdown', (event) => {
+    if (!overlays.has('contextMenu')) return;
+    if (dom.contextMenu && dom.contextMenu.contains(event.target)) return;
+    closeContextMenu();
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (overlays.has('contextMenu')) closeContextMenu();
+    else if (overlays.has('downloadPrompt')) closeDownloadPrompt();
+  });
   if (dom.downloadPasteBtn) dom.downloadPasteBtn.addEventListener('click', pasteIntoDownloadInput);
   if (dom.dashboardMediaList) {
     dom.dashboardMediaList.addEventListener('click', (event) => {
@@ -5063,6 +5324,16 @@ function attachNativeListeners() {
     if (overlays.has('siteInfo')) renderSiteInfo();
   });
 
+  listen('showDownloadPrompt', (data) => {
+    if (!data || !data.url) return;
+    showDownloadPrompt(data);
+  });
+
+  listen('contextMenuRequest', (data) => {
+    if (!data) return;
+    showContextMenu(data);
+  });
+
   listen('loadProgress', (data) => {
     if (!data) return;
     adoptNativeActiveTab(data);
@@ -5218,6 +5489,14 @@ function handleBack() {
   }
   if (overlays.has('choice')) {
     closeChoice();
+    return true;
+  }
+  if (overlays.has('contextMenu')) {
+    closeContextMenu();
+    return true;
+  }
+  if (overlays.has('downloadPrompt')) {
+    closeDownloadPrompt();
     return true;
   }
   if (overlays.has('downloadSheet')) {

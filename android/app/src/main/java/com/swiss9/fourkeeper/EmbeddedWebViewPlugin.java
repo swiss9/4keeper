@@ -28,6 +28,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -81,6 +82,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 @CapacitorPlugin(name = "EmbeddedWebView")
 public class EmbeddedWebViewPlugin extends Plugin {
@@ -193,66 +195,375 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "mixpanel.com",
         "segment.io",
         "segment.com",
-        "branch.io"
+        "branch.io",
+        "appsflyer.com",
+        "adjust.com",
+        "amplitude.com",
+        "fullstory.com",
+        "heapanalytics.com",
+        "bugsnag.com",
+        "newrelic.com",
+        "nr-data.net",
+        "clarity.ms",
+        "yandex.ru/metrika",
+        "mc.yandex.ru",
+        "statcounter.com",
+        "matomo.cloud",
+        "plausible.io",
+        "umami.is",
+        "bat.bing.com",
+        "snap.licdn.com",
+        "px.ads.linkedin.com",
+        "analytics.tiktok.com",
+        "ads-twitter.com",
+        "static.ads-twitter.com",
+        "analytics.google.com"
     };
 
-    /* Network-level ad blocklist. A HashSet keeps the per-request check O(1)
-     * with no parser and no native dependency, so the Android build stays
-     * simple and request handling stays fast. Entries are domain suffixes:
-     * any subdomain of a listed domain is blocked too. */
+    /* Network-level ad blocklist, evaluated for every sub-resource the WebView
+     * requests. Entries are domain suffixes: any subdomain of a listed domain
+     * is blocked too. The list is walked from the full host upwards and stops at
+     * the first match, so the cost per request stays constant no matter how many
+     * entries the list carries. */
     private static final HashSet<String> AD_DOMAINS = new HashSet<>(Arrays.asList(
-        "doubleclick.net",
-        "googlesyndication.com",
-        "googleadservices.com",
-        "app-measurement.com",
-        "adservice.google.com",
-        "google-analytics.com",
-        "googletagmanager.com",
-        "googletagservices.com",
-        "amazon-adsystem.com",
-        "adsrvr.org",
+        "2o7.net",
+        "33across.com",
+        "3lift.com",
+        "ad-delivery.net",
+        "ad-score.com",
+        "ad-stir.com",
+        "adap.tv",
+        "adblade.com",
+        "adcash.com",
+        "adcell.de",
+        "adcolony.com",
+        "addthis.com",
+        "adentifi.com",
+        "adforest.net",
+        "adform.net",
+        "adhigh.net",
+        "adition.com",
+        "adition.net",
+        "admixer.net",
         "adnxs.com",
+        "adotmob.com",
+        "adroll.com",
+        "ads-twitter.com",
+        "adsafeprotected.com",
+        "adscale.de",
+        "adsniper.ru",
+        "adsrvr.org",
+        "adsterra.com",
+        "adswizz.com",
+        "adtelligent.com",
+        "adtriba.io",
+        "adtrue.com",
+        "adunity.com",
+        "adverline.com",
+        "advertise.com",
+        "advertising.com",
+        "advertnative.com",
+        "advertserve.com",
+        "adyoulike.com",
+        "aerserv.com",
+        "agkn.com",
+        "aidata.io",
+        "aimatch.com",
+        "algorix.co",
+        "amazon-adsystem.com",
+        "amobee.com",
+        "apester.com",
+        "appier.net",
+        "applovin.com",
+        "appnexus.com",
+        "apptornado.com",
+        "apsalar.com",
+        "avazutracking.net",
+        "bidr.io",
+        "bidswitch.net",
+        "bidtheatre.com",
+        "bidvertiser.com",
+        "blinkx.com",
+        "bluekai.com",
+        "bluelithium.com",
+        "brand-display.com",
+        "brealtime.com",
+        "bridgewell.com",
+        "brightroll.com",
+        "buysellads.com",
+        "buzzoola.com",
         "casalemedia.com",
+        "cedexis.com",
+        "chartbeat.com",
+        "chartboost.com",
+        "clarium.io",
+        "clickagy.com",
+        "clickcertain.com",
+        "clicktale.net",
+        "coadvertise.com",
+        "comscore.com",
+        "connatix.com",
+        "contentabc.com",
+        "contextweb.com",
+        "convertro.com",
         "criteo.com",
         "criteo.net",
-        "taboola.com",
-        "outbrain.com",
-        "pubmatic.com",
-        "rubiconproject.com",
-        "openx.net",
-        "smartadserver.com",
-        "adform.net",
-        "moatads.com",
-        "adsafeprotected.com",
+        "crwdcntrl.net",
+        "ctnsnet.com",
+        "cxense.com",
+        "dable.io",
+        "de17a.com",
+        "deepintent.com",
+        "demdex.net",
+        "districtm.io",
+        "dotomi.com",
+        "doubleclick.net",
         "doubleverify.com",
-        "serving-sys.com",
+        "emxdgt.com",
+        "engagebdr.com",
+        "eqads.com",
+        "everesttech.net",
+        "exelator.com",
+        "exoclick.com",
+        "eyeota.net",
+        "eyereturn.com",
+        "fastclick.net",
         "flashtalking.com",
-        "zedo.com",
-        "yieldmo.com",
-        "adroll.com",
-        "bidswitch.net",
-        "sharethrough.com",
-        "spotxchange.com",
-        "tremorhub.com",
-        "teads.tv",
-        "3lift.com",
-        "scorecardresearch.com",
-        "quantserve.com",
+        "freewheel.tv",
+        "fwmrm.net",
+        "fyber.com",
+        "geniee.co.jp",
+        "getclicky.com",
+        "gmossp-sp.jp",
+        "google-analytics.com",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "googletagmanager.com",
+        "googletagservices.com",
+        "gumgum.com",
+        "heyzap.com",
+        "hilltopads.net",
         "hotjar.com",
-        "mixpanel.com",
-        "branch.io",
-        "applovin.com",
-        "adcolony.com",
-        "unityads.unity3d.com",
-        "vungle.com",
-        "chartboost.com",
+        "im-apps.net",
+        "impact-ad.jp",
+        "indexexchange.com",
         "inmobi.com",
-        "startappservice.com",
-        "tapjoy.com",
-        "supersonicads.com",
+        "innovid.com",
+        "intentiq.com",
+        "interclick.com",
+        "ipredictive.com",
         "ironsrc.com",
-        "mopub.com"
+        "jads.co",
+        "jivox.com",
+        "juicyads.com",
+        "justpremium.com",
+        "kargo.com",
+        "kochava.com",
+        "kontera.com",
+        "krxd.net",
+        "lemmatechnologies.com",
+        "liftoff.io",
+        "lijit.com",
+        "liveintent.com",
+        "loopme.me",
+        "lotame.com",
+        "madvertise.de",
+        "mathtag.com",
+        "media.net",
+        "mediarithmics.com",
+        "mediaplex.com",
+        "mgid.com",
+        "millennialmedia.com",
+        "mixpanel.com",
+        "mobfox.com",
+        "moatads.com",
+        "monetag.com",
+        "mookie1.com",
+        "mopub.com",
+        "nativeads.com",
+        "nativo.com",
+        "netmng.com",
+        "nexage.com",
+        "nextmillennium.io",
+        "nowads.net",
+        "nr-data.net",
+        "nrich.ai",
+        "ntv.io",
+        "ogury.com",
+        "onetag.com",
+        "openx.net",
+        "outbrain.com",
+        "perfectaudience.com",
+        "permutive.com",
+        "pixalate.net",
+        "playwire.com",
+        "plista.com",
+        "popads.net",
+        "popcash.net",
+        "presage.io",
+        "propellerads.com",
+        "pubmatic.com",
+        "pulsepoint.com",
+        "quantcast.com",
+        "quantserve.com",
+        "remerge.io",
+        "revcontent.com",
+        "revjet.com",
+        "richaudience.com",
+        "rkdms.com",
+        "rlcdn.com",
+        "rubiconproject.com",
+        "scorecardresearch.com",
+        "seedtag.com",
+        "semasio.net",
+        "serving-sys.com",
+        "sharethrough.com",
+        "simpli.fi",
+        "sizmek.com",
+        "smaato.com",
+        "smartadserver.com",
+        "smartclip.net",
+        "smartyads.com",
+        "sonobi.com",
+        "sovrn.com",
+        "sparteo.com",
+        "specificclick.net",
+        "spotxchange.com",
+        "springserve.com",
+        "stackadapt.com",
+        "startappservice.com",
+        "statcounter.com",
+        "supersonicads.com",
+        "taboola.com",
+        "tapad.com",
+        "tapjoy.com",
+        "teads.tv",
+        "telaria.com",
+        "tidaltv.com",
+        "trafficjunky.com",
+        "tribalfusion.com",
+        "tremorhub.com",
+        "tubemogul.com",
+        "turn.com",
+        "undertone.com",
+        "unityads.unity3d.com",
+        "unrulymedia.com",
+        "vdopia.com",
+        "vidazoo.com",
+        "videologygroup.com",
+        "vungle.com",
+        "yieldlab.net",
+        "yieldmanager.com",
+        "yieldmo.com",
+        "yumenetworks.com",
+        "zedo.com",
+        "zergnet.com",
+        "zorosrv.com",
+        "zqtk.net",
+        "adcolony.com",
+        "admob.com",
+        "adwhirl.com",
+        "inner-active.com",
+        "jumptap.com",
+        "kiip.me",
+        "leadbolt.net",
+        "mobclix.com",
+        "tapreason.com",
+        "vserv.com",
+        "zimedia.co"
     ));
+
+    /* URL-shape rules for ads that live on a first-party domain. They are
+     * compiled into ONE pattern, so a request costs a single matcher pass
+     * instead of a loop over dozens of regexes. Everything here runs on the
+     * WebView's IO thread (never the UI thread) and touches no disk and no
+     * SharedPreferences, so a page with hundreds of sub-resources cannot stall
+     * the interface. */
+    private static final String[] AD_URL_RULES = new String[] {
+        "[/.@-]ads?[/._-]",
+        "[/._-]ads?\\d*\\.(js|json|xml|html?|php|gif|png|jpe?g|css)",
+        "^https?://[^/]*ads?\\.",
+        "/adserver",
+        "/adservice",
+        "/advert",
+        "/adframe",
+        "/adsense",
+        "/adslot",
+        "/adunit",
+        "/pagead/",
+        "/popunder",
+        "/pop-up",
+        "/interstitial",
+        "/banners?/",
+        "[/._-]banners?([/._-]|$)",
+        "/sponsors?/",
+        "/sponsored/",
+        "/prebid",
+        "/bidder",
+        "/vast",
+        "/vpaid",
+        "/companion",
+        "/tracking/(pixel|collect|beacon|impression)",
+        "/pixel\\.gif",
+        "/beacon\\.gif",
+        "/analytics\\.(js|json)",
+        "doubleclick\\.net",
+        "googlesyndication",
+        "googleadservices",
+        "google-analytics",
+        "googletagmanager",
+        "amazon-adsystem",
+        "/gampad/",
+        "/gpt/",
+        "[/.]gpt\\.js"
+    };
+
+    private static final Pattern AD_URL_PATTERN = Pattern.compile(
+        joinAlternation(AD_URL_RULES),
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static String joinAlternation(String[] rules) {
+        StringBuilder builder = new StringBuilder();
+        for (String rule : rules) {
+            if (builder.length() > 0) builder.append('|');
+            builder.append("(?:").append(rule).append(')');
+        }
+        return builder.toString();
+    }
+
+    /* Extensions that should be downloaded instead of rendered by the page. */
+    private static final String[] DOWNLOAD_EXTENSIONS = new String[] {
+        "apk", "zip", "rar", "7z", "tar", "gz", "tgz", "xz", "bz2", "iso",
+        "exe", "msi", "dmg", "deb", "rpm", "torrent", "pdf", "epub", "mobi",
+        "mp3", "m4a", "flac", "wav", "ogg", "opus",
+        "mp4", "m4v", "mkv", "avi", "mov", "wmv", "flv", "webm", "ts",
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods"
+    };
+
+    /* Long-press bridge for the custom in-app context menu. The script is
+     * idempotent, only ever reports the tapped link/image to the native side,
+     * and never touches the page itself: the menu is Capacitor UI, so no Android
+     * system menu can leak through. */
+    private static final String CONTEXT_MENU_JS =
+        "(function(){try{"
+            + "if(window.__fourKeeperContextMenu)return;window.__fourKeeperContextMenu=1;"
+            + "document.addEventListener('contextmenu',function(e){"
+            + "var node=e.target,img=null,vid=null,link=null;"
+            + "while(node&&node!==document.body){"
+            + "if(!img&&node.tagName==='IMG')img=node;"
+            + "if(!vid&&node.tagName==='VIDEO')vid=node;"
+            + "if(!link&&node.tagName==='A'&&node.href)link=node;"
+            + "node=node.parentElement;}"
+            + "if(!link&&!img&&!vid)return;"
+            + "e.preventDefault();"
+            + "var image=img?(img.currentSrc||img.src||''):'';"
+            + "var video=vid?(vid.currentSrc||vid.src||''):'';"
+            + "var text=((link&&link.textContent)||(img&&img.alt)||'').replace(/\\s+/g,' ').trim().slice(0,160);"
+            + "try{window.FourKeeperHost.showContextMenu((link&&link.href)||'',image,video,text,"
+            + "Math.round(e.clientX||0),Math.round(e.clientY||0));}catch(err){}"
+            + "},true);"
+            + "}catch(e){}})();";
 
     private static class Tab {
         final int id;
@@ -351,8 +662,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean javaScriptEnabled = true;
     private boolean popupsEnabled = true;
     private boolean safeBrowsingEnabled = true;
-    private boolean trackingProtectionEnabled = false;
-    private boolean adBlockEnabled = true;
+    /* Read from the WebView's IO thread inside shouldInterceptRequest, so the
+     * flags must be volatile or a settings change could stay invisible there. */
+    private volatile boolean trackingProtectionEnabled = false;
+    private volatile boolean adBlockEnabled = true;
     private boolean fingerprintBlockEnabled = true;
     private boolean desktopMode = false;
     private boolean pinchZoomEnabled = true;
@@ -373,6 +686,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private SharedPreferences prefs;
     private ExecutorService downloadExecutor;
+    /* Size probes for the download prompt: a slow server must never delay a
+     * page or hold one of the download workers, so they get their own thread. */
+    private ExecutorService probeExecutor;
     private final Object serialDownloadLock = new Object();
     private final Object downloadRecordLock = new Object();
     /* Downloads currently served by the multi-threaded engine, so a cancel
@@ -429,6 +745,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         cookiesMode = prefs.getString("cookiesMode", "all");
 
         downloadExecutor = Executors.newFixedThreadPool(4);
+        probeExecutor = Executors.newSingleThreadExecutor();
         registerDownloadWatcher();
         registerCreateDocumentLauncher();
         makeBridgeTransparent();
@@ -622,6 +939,42 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
+    /**
+     * Page-side bridge for the context menu. Only annotated methods are exposed
+     * to page JavaScript and each one just forwards tap metadata to the app UI;
+     * nothing here reads files, settings or download records.
+     */
+    private class PageBridge {
+        private final int tabId;
+
+        PageBridge(int tabId) {
+            this.tabId = tabId;
+        }
+
+        @JavascriptInterface
+        public void showContextMenu(String link, String image, String video, String text, int x, int y) {
+            final String linkUrl = link == null ? "" : link;
+            final String imageUrl = image == null ? "" : image;
+            final String videoUrl = video == null ? "" : video;
+            final String label = text == null ? "" : text;
+            final int tapX = x;
+            final int tapY = y;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            activity.runOnUiThread(() -> {
+                JSObject data = new JSObject();
+                data.put("tabId", tabId);
+                data.put("linkUrl", linkUrl);
+                data.put("imageUrl", imageUrl);
+                data.put("videoUrl", videoUrl);
+                data.put("text", label);
+                data.put("x", tapX);
+                data.put("y", tapY);
+                notifyListeners("contextMenuRequest", data);
+            });
+        }
+    }
+
     private Tab createTabInternal(String url) {
         int id = nextTabId++;
         WebView view = new WebView(getContext());
@@ -632,8 +985,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         applySettingsTo(view);
         view.setWebViewClient(new TabClient(id));
         view.setWebChromeClient(new TabChromeClient(id));
+        view.addJavascriptInterface(new PageBridge(id), "FourKeeperHost");
         view.setDownloadListener((downloadUrl, userAgent, contentDisposition, mimeType, contentLength) ->
-            enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType, id)
+            promptDownload(downloadUrl, userAgent, contentDisposition, mimeType, contentLength, id)
         );
         view.setOnTouchListener(new PullToRefreshListener(view));
         view.setVisibility(View.INVISIBLE);
@@ -762,6 +1116,38 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return false;
     }
 
+    /**
+     * Full ad test for one request: the host list first (cheap, exact) and then
+     * the combined URL pattern for first-party ad paths such as /ads/,
+     * /pagead/ or ad-banner.js. Runs on the WebView IO thread, allocates
+     * nothing per rule and never waits on a lock, so it cannot block the UI.
+     */
+    private static boolean isBlockedRequest(String host, String url) {
+        if (isAdHost(host)) return true;
+        if (url == null || url.isEmpty()) return false;
+        try {
+            return AD_URL_PATTERN.matcher(url).find();
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
+    /** True when tapping the URL should open the download sheet, not the page. */
+    private static boolean isDownloadUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        String lower = url.toLowerCase(Locale.US);
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) return false;
+        int cut = lower.indexOf('#');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        cut = lower.indexOf('?');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        if (lower.endsWith("/")) return false;
+        for (String extension : DOWNLOAD_EXTENSIONS) {
+            if (lower.endsWith("." + extension)) return true;
+        }
+        return false;
+    }
+
     private static WebResourceResponse blockedResponse() {
         return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
     }
@@ -824,6 +1210,19 @@ public class EmbeddedWebViewPlugin extends Plugin {
             Uri uri = request.getUrl();
             String scheme = uri.getScheme();
             if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                /* A main-frame link that points straight at a file is a download,
+                 * not a page: ask the user first instead of navigating. */
+                if (request.isForMainFrame() && isDownloadUrl(uri.toString())) {
+                    promptDownload(
+                        uri.toString(),
+                        view.getSettings().getUserAgentString(),
+                        null,
+                        "",
+                        0L,
+                        tabId
+                    );
+                    return true;
+                }
                 return false;
             }
             try {
@@ -861,6 +1260,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (adBlockEnabled) {
                 view.evaluateJavascript(AD_HIDE_CSS_JS, null);
             }
+            if (javaScriptEnabled) {
+                view.evaluateJavascript(CONTEXT_MENU_JS, null);
+            }
             if (snifferEnabled) {
                 view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
             }
@@ -894,15 +1296,28 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-            detectMediaRequest(tabId, request);
-            if (!request.isForMainFrame()) {
-                String host = request.getUrl().getHost();
-                if (adBlockEnabled && isAdHost(host)) {
-                    return blockedResponse();
-                }
-                if (trackingProtectionEnabled && isTracker(host)) {
-                    return blockedResponse();
-                }
+            /* Android calls this on a WebView IO thread, never the UI thread,
+             * and everything below is CPU-only: no disk I/O, no
+             * SharedPreferences and no locks. The flags are volatile, so a
+             * settings change is picked up without stalling request handling. */
+            final boolean ads = adBlockEnabled;
+            final boolean trackers = trackingProtectionEnabled;
+            final Uri uri = request.getUrl();
+            final String host = uri == null ? null : uri.getHost();
+            final String url = uri == null ? null : uri.toString();
+            final boolean mainFrame = request.isForMainFrame();
+
+            /* Pop-unders and full-page ad redirects: only the exact domain list
+             * may stop a main-frame navigation. URL patterns are applied to
+             * sub-resources only, because a normal page can carry /ads/ in its
+             * own path. */
+            if (ads && mainFrame && isAdHost(host)) {
+                return blockedResponse();
+            }
+            if (!mainFrame) {
+                if (ads && isBlockedRequest(host, url)) return blockedResponse();
+                if (trackers && isTracker(host)) return blockedResponse();
+                detectMediaRequest(tabId, request);
             }
             return null;
         }
@@ -1337,6 +1752,37 @@ public class EmbeddedWebViewPlugin extends Plugin {
         final String targetUrl = url.trim();
         final String targetMime = mime == null ? "" : mime;
         getActivity().runOnUiThread(() -> enqueueDownload(targetUrl, null, null, targetMime, sourceTabId));
+        call.resolve();
+    }
+
+    /**
+     * Starts a download the user confirmed in the download prompt. The filename
+     * the prompt showed is passed through as a Content-Disposition header so
+     * URLUtil keeps it instead of re-guessing a different name.
+     */
+    @PluginMethod
+    public void startDownload(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url == null || url.trim().isEmpty()) {
+            call.reject("A download URL is required.");
+            return;
+        }
+        String filename = call.getString("filename", "");
+        String mime = call.getString("mime", "");
+        String userAgent = call.getString("userAgent", "");
+        Integer tabId = call.getInt("tabId");
+        int sourceTabId = (tabId != null && tabId >= 0) ? tabId : activeTabId;
+        String disposition = "attachment";
+        if (filename != null && !filename.trim().isEmpty()) {
+            disposition = "attachment; filename=\"" + safeFilename(filename) + "\"";
+        }
+        final String targetUrl = url.trim();
+        final String targetDisposition = disposition;
+        final String targetMime = mime == null ? "" : mime;
+        final String targetAgent = userAgent == null ? "" : userAgent;
+        getActivity().runOnUiThread(
+            () -> enqueueDownload(targetUrl, targetAgent, targetDisposition, targetMime, sourceTabId)
+        );
         call.resolve();
     }
 
@@ -1972,6 +2418,139 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     /**
+     * Asks the app before a link tap turns into a download. Called from the
+     * WebView's UI thread for link taps and from the download listener; the size
+     * probe always runs on {@link #probeExecutor}, never on the UI thread.
+     */
+    private void promptDownload(
+        String url,
+        String userAgent,
+        String contentDisposition,
+        String mime,
+        long sizeHint,
+        int sourceTabId
+    ) {
+        if (url == null || url.isEmpty()) return;
+        String filename = safeFilename(
+            android.webkit.URLUtil.guessFileName(url, contentDisposition, mime)
+        );
+        String resolvedMime = mime == null ? "" : mime;
+        if (resolvedMime.isEmpty() || "application/octet-stream".equalsIgnoreCase(resolvedMime)) {
+            resolvedMime = mimeForName(filename);
+        }
+        final String finalName = filename;
+        final String finalMime = resolvedMime;
+        final String agent = userAgent == null ? "" : userAgent;
+        if (sizeHint > 0) {
+            emitDownloadPrompt(url, finalName, finalMime, agent, sizeHint, sourceTabId);
+            return;
+        }
+        ExecutorService executor = probeExecutor;
+        if (executor == null) {
+            emitDownloadPrompt(url, finalName, finalMime, agent, 0L, sourceTabId);
+            return;
+        }
+        try {
+            executor.execute(() ->
+                emitDownloadPrompt(url, finalName, finalMime, agent, probeSize(url), sourceTabId)
+            );
+        } catch (Exception error) {
+            /* The executor can be shutting down while a page is still live. */
+            emitDownloadPrompt(url, finalName, finalMime, agent, 0L, sourceTabId);
+        }
+    }
+
+    private void emitDownloadPrompt(
+        String url,
+        String filename,
+        String mime,
+        String userAgent,
+        long size,
+        int tabId
+    ) {
+        Activity activity = getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            JSObject data = new JSObject();
+            data.put("url", url);
+            data.put("filename", filename);
+            data.put("mime", mime);
+            data.put("userAgent", userAgent);
+            data.put("size", size);
+            data.put("tabId", tabId);
+            notifyListeners("showDownloadPrompt", data);
+        });
+    }
+
+    /** HEAD probe for the prompt's size line. Short timeouts: a slow server must
+     * not delay the sheet, the size is simply shown as unknown. */
+    private static long probeSize(String url) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(6000);
+            connection.setReadTimeout(6000);
+            connection.setRequestMethod("HEAD");
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("Accept", "*/*");
+            int code = connection.getResponseCode();
+            if (code >= 200 && code < 400) {
+                String header = connection.getHeaderField("Content-Length");
+                if (header != null) {
+                    try {
+                        long length = Long.parseLong(header.trim());
+                        if (length > 0) return length;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+        return 0L;
+    }
+
+    /** Keeps a prompt filename harmless: no path separators, quotes or newlines. */
+    private static String safeFilename(String name) {
+        String value = name == null ? "" : name.trim();
+        if (value.isEmpty()) return "download";
+        value = value.replace('\\', '_').replace('/', '_').replace('"', '_').replace('=', '_');
+        value = value.replace('\n', '_').replace('\r', '_');
+        if (value.length() > 120) {
+            int dot = value.lastIndexOf('.');
+            String ext = dot > 0 && value.length() - dot <= 8 ? value.substring(dot) : "";
+            value = value.substring(0, 120 - ext.length()) + ext;
+        }
+        return value;
+    }
+
+    private static String mimeForName(String name) {
+        String lower = name == null ? "" : name.toLowerCase(Locale.US);
+        int dot = lower.lastIndexOf('.');
+        if (dot < 0) return "application/octet-stream";
+        switch (lower.substring(dot + 1)) {
+            case "apk": return "application/vnd.android.package-archive";
+            case "zip": return "application/zip";
+            case "rar": return "application/x-rar-compressed";
+            case "7z": return "application/x-7z-compressed";
+            case "pdf": return "application/pdf";
+            case "epub": return "application/epub+zip";
+            case "mp3": return "audio/mpeg";
+            case "m4a": return "audio/mp4";
+            case "mp4": return "video/mp4";
+            case "mkv": return "video/x-matroska";
+            case "webm": return "video/webm";
+            case "jpg":
+            case "jpeg": return "image/jpeg";
+            case "png": return "image/png";
+            case "gif": return "image/gif";
+            case "webp": return "image/webp";
+            default: return "application/octet-stream";
+        }
+    }
+
+    /**
      * Routes a download through the native multi-threaded engine instead of
      * Android's DownloadManager, so the "Connections per file" setting (1, 4,
      * 8 or 16 ranged connections) is actually used.
@@ -2507,6 +3086,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (downloadExecutor != null) {
             downloadExecutor.shutdownNow();
             downloadExecutor = null;
+        }
+        if (probeExecutor != null) {
+            probeExecutor.shutdownNow();
+            probeExecutor = null;
         }
         for (MultiThreadDownloader downloader : activeDownloaders.values()) {
             downloader.cancel();

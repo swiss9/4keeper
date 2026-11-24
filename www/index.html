@@ -273,6 +273,27 @@
       </div>
     </section>
 
+    <!-- Download confirmation: raised from native when a link points at a file -->
+    <div id="downloadPromptBackdrop" class="backdrop"></div>
+    <section id="downloadPrompt" class="sheet prompt-sheet" role="dialog" aria-modal="true" aria-label="Confirm download" aria-hidden="true">
+      <div class="sheet-handle"></div>
+      <div class="prompt-body">
+        <span class="prompt-icon" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </span>
+        <h2 class="prompt-title">Download this file?</h2>
+        <p id="downloadPromptName" class="prompt-name">file</p>
+        <p id="downloadPromptMeta" class="prompt-meta">File</p>
+      </div>
+      <div class="prompt-actions">
+        <button id="downloadPromptCancel" class="prompt-btn" type="button">Cancel</button>
+        <button id="downloadPromptConfirm" class="prompt-btn is-primary" type="button">Download</button>
+      </div>
+    </section>
+
+    <!-- Custom long-press menu for links, images and video -->
+    <div id="contextMenu" class="ctx-menu" role="menu" aria-label="Page actions" hidden></div>
+
     <!-- Tab manager -->
     <div id="tabSheetBackdrop" class="backdrop"></div>
     <section id="tabSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" aria-label="Tabs" aria-hidden="true">

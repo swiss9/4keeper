@@ -499,6 +499,108 @@ select {
   color: var(--text-2);
 }
 
+/* Favicon sits over the letter, which is the fallback when the image fails. */
+.qa-icon {
+  position: relative;
+}
+
+.qa-fav {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.qa-remove {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.qa-tile.is-editing .qa-icon {
+  animation: qa-jiggle 0.34s ease-in-out infinite alternate;
+}
+
+@keyframes qa-jiggle {
+  from {
+    transform: rotate(-2.5deg);
+  }
+  to {
+    transform: rotate(2.5deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-tile.is-editing .qa-icon {
+    animation: none;
+  }
+}
+
+/* Shortcuts tab ------------------------------------------------------- */
+
+.shortcuts-view {
+  padding-bottom: 9px;
+}
+
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 0 0;
+}
+
+.shortcuts-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.shortcuts-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border: 1px solid var(--qa-border);
+  border-radius: 999px;
+  background: var(--qa-bg);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.shortcuts-edit.is-active {
+  border-color: currentColor;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.quick-add-delete {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid var(--qa-border);
+  border-radius: 16px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 650;
+}
+
 /* -------------------------------------------------------- New tab page */
 
 .new-tab {
@@ -887,14 +989,14 @@ select {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex: 0 0 auto;
   height: 40px;
-  padding: 0 9px;
+  padding: 0 7px;
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
   white-space: nowrap;

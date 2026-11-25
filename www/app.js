@@ -166,6 +166,8 @@ let isDashboardMode = true;
 let booting = true;
 let dashboardActive = true;
 let dashboardStatusFilter = 'all';
+let shortcutsEditing = false;
+let editingShortcutIndex = -1;
 let dashboardCategory = 'all';
 let dashboardQuery = '';
 let dashboardSearchOpen = false;
@@ -235,6 +237,10 @@ const dom = {
   quickAddName: $('quickAddName'),
   quickAddUrl: $('quickAddUrl'),
   quickAddClose: $('quickAddClose'),
+  quickAddTitle: $('quickAddTitle'),
+  quickAddDelete: $('quickAddDelete'),
+  shortcutsView: $('shortcutsView'),
+  shortcutsEditBtn: $('shortcutsEditBtn'),
   dashboardSection: $('dashboardSection'),
   dashboardForm: $('dashboardForm'),
   dashboardInput: $('dashboardInput'),
@@ -2271,6 +2277,7 @@ function dashboardCounts() {
 }
 
 function dashboardDownloadItems() {
+  if (dashboardStatusFilter === 'shortcuts') return [];
   const query = dashboardQuery.trim().toLowerCase();
   const items = downloadsCache.filter((item) => {
     if (dashboardStatusFilter !== 'all' && downloadStatusGroup(item) !== dashboardStatusFilter) return false;
@@ -2470,6 +2477,10 @@ function syncDashboardFilters() {
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+    /* Five tabs do not fit on a narrow phone, so the bar scrolls: keep the
+     * selected tab in view instead of leaving it off the edge. */
+    const activeTab = dom.dashboardFilters.querySelector('.dl-filter.is-active');
+    if (activeTab) activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   if (dom.dashboardCategories) {
     dom.dashboardCategories.querySelectorAll('[data-dl-category]').forEach((button) => {
@@ -2480,8 +2491,21 @@ function syncDashboardFilters() {
   }
 }
 
+function syncDashboardView() {
+  const shortcuts = dashboardStatusFilter === 'shortcuts';
+  if (dom.shortcutsView) dom.shortcutsView.classList.toggle('hidden', !shortcuts);
+  if (dom.dashboardCategories) dom.dashboardCategories.classList.toggle('hidden', shortcuts);
+  if (dom.dashboardQueue) dom.dashboardQueue.classList.toggle('hidden', shortcuts);
+  if (dom.dashboardSortBtn) dom.dashboardSortBtn.classList.toggle('hidden', shortcuts);
+  if (!shortcuts && shortcutsEditing) setShortcutsEditing(false);
+  /* The sort menu belongs to the download list; leaving it open over the
+   * Shortcuts tab looks like it belongs to the grid. */
+  if (shortcuts) setDashboardSortMenu(false);
+}
+
 function renderDashboardQueue() {
   if (!dom.dashboardQueue) return;
+  syncDashboardView();
   const counts = dashboardCounts();
   if (dom.dashboardFilters) {
     dom.dashboardFilters.querySelectorAll('[data-dl-count]').forEach((node) => {
@@ -2975,32 +2999,56 @@ async function downloadDashboardMedia(index, button) {
 /* ---------------------------------------------------------- Quick access */
 
 const QUICK_ACCESS_DEFAULT = [
-  { key: 'google', label: 'Google', url: 'https://www.google.com', glyph: '<span class="qa-letter">G</span>' },
-  { key: 'youtube', label: 'YouTube', url: 'https://www.youtube.com', glyph: '<svg class="qa-glyph" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3Z" fill="currentColor"/></svg>' },
-  { key: 'instagram', label: 'Instagram', url: 'https://www.instagram.com', glyph: '<svg class="qa-glyph" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="1.1" fill="currentColor"/></svg>' }
+  { label: 'Google', url: 'https://www.google.com' },
+  { label: 'YouTube', url: 'https://www.youtube.com' },
+  { label: 'Instagram', url: 'https://www.instagram.com' }
 ];
 
-function quickAccessItems() {
-  const custom = Array.isArray(settings.quickAccess) ? settings.quickAccess : [];
-  const known = QUICK_ACCESS_DEFAULT.map((item) => item.url);
-  const extra = custom
-    .filter((item) => item && typeof item.url === 'string' && item.url && known.indexOf(item.url) === -1)
-    .map((item) => {
-      const label = String(item.label || hostOf(item.url));
-      return { label: label, url: item.url, glyph: '<span class="qa-letter">' + escapeHtml(label.charAt(0).toUpperCase()) + '</span>' };
-    });
-  return QUICK_ACCESS_DEFAULT.concat(extra);
+function shortcutFavicon(url) {
+  return 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostOf(url)) + '&sz=128';
+}
+
+/* The stored list is authoritative once the user edited it. Older builds wrote
+ * only the custom tiles, so seed the built-in ones once on top of them. */
+function migrateShortcuts() {
+  if (!Array.isArray(settings.quickAccess) || settings.shortcutsMigrated) return;
+  const urls = settings.quickAccess.map((item) => (item && item.url) || '');
+  settings.quickAccess = QUICK_ACCESS_DEFAULT.filter((item) => urls.indexOf(item.url) === -1)
+    .map((item) => ({ label: item.label, url: item.url }))
+    .concat(settings.quickAccess);
+  settings.shortcutsMigrated = true;
+  Store.save('settings');
+}
+
+function shortcutItems() {
+  const list = Array.isArray(settings.quickAccess) ? settings.quickAccess : QUICK_ACCESS_DEFAULT;
+  return list.filter((item) => item && typeof item.url === 'string' && item.url);
+}
+
+/* Editing a built-in shortcut has to freeze the whole list first, otherwise the
+ * default would reappear after it was renamed or deleted. */
+function editableShortcuts() {
+  settings.quickAccess = shortcutItems().map((item) => ({
+    label: String(item.label || hostOf(item.url)),
+    url: item.url
+  }));
+  return settings.quickAccess;
 }
 
 function renderQuickAccess() {
-  const tiles = quickAccessItems()
-    .map(
-      (item) => `
-      <button class="qa-tile" type="button" data-qa-url="${escapeHtml(item.url)}">
-        <span class="qa-icon qa-icon--${escapeHtml(item.key || 'custom')}">${item.glyph}</span>
-        <span class="qa-label">${escapeHtml(item.label)}</span>
-      </button>`
-    )
+  const tiles = shortcutItems()
+    .map((item, index) => {
+      const label = String(item.label || hostOf(item.url));
+      return `
+      <button class="qa-tile${shortcutsEditing ? ' is-editing' : ''}" type="button" data-qa-url="${escapeHtml(item.url)}" data-qa-index="${index}">
+        <span class="qa-icon">
+          <span class="qa-letter">${escapeHtml(label.charAt(0).toUpperCase())}</span>
+          <img class="qa-fav" src="${escapeHtml(shortcutFavicon(item.url))}" alt="" loading="lazy" />
+          ${shortcutsEditing ? '<span class="qa-remove" aria-hidden="true">−</span>' : ''}
+        </span>
+        <span class="qa-label">${escapeHtml(label)}</span>
+      </button>`;
+    })
     .join('');
   const html =
     tiles +
@@ -3010,17 +3058,44 @@ function renderQuickAccess() {
         <span class="qa-label">Add</span>
       </button>`;
   [dom.dashboardQuickAccess, dom.newTabQuickAccess].forEach((node) => {
-    if (node) node.innerHTML = html;
+    if (!node) return;
+    node.innerHTML = html;
+    /* No favicon (offline, unknown host) falls back to the letter. */
+    node.querySelectorAll('img.qa-fav').forEach((img) => {
+      img.addEventListener('error', () => img.remove());
+    });
   });
 }
 
+function setShortcutsEditing(on) {
+  shortcutsEditing = !!on;
+  if (dom.shortcutsView) dom.shortcutsView.classList.toggle('is-editing', shortcutsEditing);
+  if (dom.shortcutsEditBtn) {
+    dom.shortcutsEditBtn.classList.toggle('is-active', shortcutsEditing);
+    dom.shortcutsEditBtn.setAttribute('aria-pressed', shortcutsEditing ? 'true' : 'false');
+    const label = dom.shortcutsEditBtn.querySelector('span');
+    if (label) label.textContent = shortcutsEditing ? 'Done' : 'Edit';
+  }
+  renderQuickAccess();
+}
+
 function openQuickAdd() {
+  openShortcutEditor(-1);
+}
+
+function openShortcutEditor(index) {
+  editingShortcutIndex = typeof index === 'number' ? index : -1;
+  const item = editingShortcutIndex >= 0 ? shortcutItems()[editingShortcutIndex] : null;
   closeTabSheet();
   closeMenu();
   closeSiteInfo();
   hideSuggestions();
-  if (dom.quickAddName) dom.quickAddName.value = '';
-  if (dom.quickAddUrl) dom.quickAddUrl.value = '';
+  if (dom.quickAddTitle) dom.quickAddTitle.textContent = item ? 'Edit shortcut' : 'Add shortcut';
+  if (dom.quickAddName) dom.quickAddName.value = item ? String(item.label || '') : '';
+  if (dom.quickAddUrl) dom.quickAddUrl.value = item ? item.url : '';
+  if (dom.quickAddDelete) dom.quickAddDelete.classList.toggle('hidden', !item);
+  const submitLabel = dom.quickAddForm && dom.quickAddForm.querySelector('[type="submit"] span');
+  if (submitLabel) submitLabel.textContent = item ? 'Save shortcut' : 'Add shortcut';
   openSheet('quickAdd', dom.quickAddSheet, dom.quickAddBackdrop);
   window.setTimeout(() => {
     if (overlays.has('quickAdd') && dom.quickAddUrl) dom.quickAddUrl.focus();
@@ -3028,6 +3103,7 @@ function openQuickAdd() {
 }
 
 function closeQuickAdd() {
+  editingShortcutIndex = -1;
   if (overlays.has('quickAdd')) closeSheet('quickAdd', dom.quickAddSheet, dom.quickAddBackdrop);
 }
 
@@ -3039,13 +3115,27 @@ function submitQuickAdd() {
   }
   const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw.replace(/^\/+/, '');
   const label = (dom.quickAddName && dom.quickAddName.value.trim()) || hostOf(url);
-  const custom = Array.isArray(settings.quickAccess) ? settings.quickAccess.slice() : [];
-  custom.push({ label: label, url: url });
-  settings.quickAccess = custom;
+  const list = editableShortcuts();
+  const index = editingShortcutIndex >= 0 && editingShortcutIndex < list.length ? editingShortcutIndex : -1;
+  if (index >= 0) list[index] = { label: label, url: url };
+  else list.push({ label: label, url: url });
+  settings.quickAccess = list;
   Store.save('settings');
   renderQuickAccess();
   closeQuickAdd();
-  toast('Shortcut added');
+  toast(index >= 0 ? 'Shortcut updated' : 'Shortcut added');
+}
+
+function deleteShortcut() {
+  const list = editableShortcuts();
+  const index = editingShortcutIndex;
+  if (index < 0 || index >= list.length) return;
+  list.splice(index, 1);
+  settings.quickAccess = list;
+  Store.save('settings');
+  renderQuickAccess();
+  closeQuickAdd();
+  toast('Shortcut deleted');
 }
 
 /* ------------------------------------------------------------ App modes */
@@ -5203,6 +5293,8 @@ function attachUiListeners() {
     });
   }
   if (dom.quickAddClose) dom.quickAddClose.addEventListener('click', closeQuickAdd);
+  if (dom.quickAddDelete) dom.quickAddDelete.addEventListener('click', deleteShortcut);
+  if (dom.shortcutsEditBtn) dom.shortcutsEditBtn.addEventListener('click', () => setShortcutsEditing(!shortcutsEditing));
   if (dom.quickAddBackdrop) dom.quickAddBackdrop.addEventListener('click', closeQuickAdd);
   if (dom.quickAddForm) {
     dom.quickAddForm.addEventListener('submit', (event) => {
@@ -5211,7 +5303,8 @@ function attachUiListeners() {
     });
   }
   /* One delegated handler serves both Quick Access grids, which are rebuilt
-   * whenever a shortcut is added. */
+   * whenever a shortcut is added. While the Shortcuts tab is in edit mode a tap
+   * opens the editor instead of navigating. */
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (!target || typeof target.closest !== 'function') return;
@@ -5220,7 +5313,12 @@ function attachUiListeners() {
       return;
     }
     const tile = target.closest('[data-qa-url]');
-    if (tile) navigate(tile.getAttribute('data-qa-url'));
+    if (!tile) return;
+    if (shortcutsEditing && tile.closest('#dashboardQuickAccess')) {
+      openShortcutEditor(Number(tile.getAttribute('data-qa-index')));
+      return;
+    }
+    navigate(tile.getAttribute('data-qa-url'));
   });
   if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
   if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
@@ -6045,6 +6143,7 @@ async function boot() {
   applyTheme();
   applyDensity();
   updateMenuCounts();
+  migrateShortcuts();
   renderQuickAccess();
 
   await mountBrowser(true);

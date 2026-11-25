@@ -97,13 +97,6 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
 
-    /* A blocked popup returns null from window.open, and sites that then call
-     * .focus() or .close() on it threw. Hand them a no-op window object, then
-     * put the real window.open back so the next popup still reaches the user. */
-    private static final String POPUP_STUB_JS =
-        "(function(){var real=window.open;window.open=function(){setTimeout(function(){window.open=real;},0);"
-            + "return{focus:function(){},close:function(){},postMessage:function(){},blur:function(){}};};})();";
-
     /* Hides ad containers that survive network blocking (in-page slots, GPT
      * wrappers, sponsored boxes) without touching legitimate layout. */
     private static final String AD_HIDE_CSS_JS =
@@ -878,9 +871,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         settings.setDisplayZoomControls(zoomControlsVisible);
         settings.setTextZoom(textZoom);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setJavaScriptCanOpenWindowsAutomatically(popupsEnabled);
-        /* Popups are intercepted in onCreateWindow and offered to the user
-         * instead of opening on their own, so the callback must be enabled. */
+        /* Leaving this off makes WebView drop window.open() before it ever
+         * reaches onCreateWindow, which crashes pages that use the handle. The
+         * window itself is never shown: onCreateWindow intercepts it. */
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setSupportMultipleWindows(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
@@ -1372,8 +1366,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
 
         /**
-         * A page asked for a popup (target=_blank or window.open). The window is
-         * never created: the shell asks the user first and opens a tab itself.
+         * A page asked for a popup (target=_blank or window.open). The page must
+         * get a real window handle or its follow-up .focus()/.close() throws and
+         * kills the calling script, so hand WebView a throwaway WebView and
+         * abort the load as soon as the URL is known. Nothing is ever shown: the
+         * shell offers the URL as a new tab instead.
          */
         @Override
         public boolean onCreateWindow(
@@ -1382,25 +1379,40 @@ public class EmbeddedWebViewPlugin extends Plugin {
             boolean isUserGesture,
             android.os.Message resultMsg
         ) {
-            String url = "";
-            WebView.HitTestResult hit = view.getHitTestResult();
-            if (hit != null && hit.getExtra() != null) url = hit.getExtra();
-            Uri target = Uri.parse(url);
-            String scheme = target.getScheme();
-            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
-                /* shortcut: window.open() with no tapped link has no URL until a
-                 * WebView is created for it; that popup stays blocked for now. */
-                view.evaluateJavascript(POPUP_STUB_JS, null);
-                return false;
+            WebView popup = new WebView(view.getContext());
+            popup.setWebViewClient(
+                new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView target, WebResourceRequest request) {
+                        requestTab(request.getUrl().toString(), target);
+                        return true;
+                    }
+
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView target, String url) {
+                        requestTab(url, target);
+                        return true;
+                    }
+                }
+            );
+            WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+            transport.setWebView(popup);
+            resultMsg.sendToTarget();
+            return true;
+        }
+
+        /** Reports an intercepted popup URL, then disposes the throwaway view. */
+        private void requestTab(String url, WebView popup) {
+            String scheme = url == null ? null : Uri.parse(url).getScheme();
+            if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                JSObject data = new JSObject();
+                data.put("url", url);
+                data.put("tabId", tabId);
+                notifyListeners("newTabRequested", data);
             }
-            JSObject data = new JSObject();
-            data.put("url", url);
-            data.put("tabId", tabId);
-            notifyListeners("newTabRequested", data);
-            /* Return false: the WebView must not create the window itself. The
-             * page keeps a dummy handle so its popup follow-up code survives. */
-            view.evaluateJavascript(POPUP_STUB_JS, null);
-            return false;
+            /* Destroy on the next turn: destroying inside the load callback
+             * aborts the WebView mid-call. */
+            popup.postDelayed(popup::destroy, 1000);
         }
 
         @Override

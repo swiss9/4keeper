@@ -97,6 +97,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
 
+    /* A blocked popup returns null from window.open, and sites that then call
+     * .focus() or .close() on it threw. Hand them a no-op window object, then
+     * put the real window.open back so the next popup still reaches the user. */
+    private static final String POPUP_STUB_JS =
+        "(function(){var real=window.open;window.open=function(){setTimeout(function(){window.open=real;},0);"
+            + "return{focus:function(){},close:function(){},postMessage:function(){},blur:function(){}};};})();";
+
     /* Hides ad containers that survive network blocking (in-page slots, GPT
      * wrappers, sponsored boxes) without touching legitimate layout. */
     private static final String AD_HIDE_CSS_JS =
@@ -758,8 +765,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
         registerDownloadWatcher();
         registerCreateDocumentLauncher();
         makeBridgeTransparent();
-        markStaleDownloads();
-        restorePausedDownloads();
+        /* Record repair and paused-state restore read two JSON files plus every
+         * partial file; doing it inline delayed plugin load, and with it the
+         * dashboard. The shell fills in after "downloadsRestored". */
+        downloadExecutor.execute(() -> {
+            markStaleDownloads();
+            restorePausedDownloads();
+            notifyListeners("downloadsRestored", new JSObject());
+        });
     }
 
     private void makeBridgeTransparent() {
@@ -1377,13 +1390,16 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
                 /* shortcut: window.open() with no tapped link has no URL until a
                  * WebView is created for it; that popup stays blocked for now. */
+                view.evaluateJavascript(POPUP_STUB_JS, null);
                 return false;
             }
             JSObject data = new JSObject();
             data.put("url", url);
             data.put("tabId", tabId);
             notifyListeners("newTabRequested", data);
-            /* Return false: the WebView must not create the window itself. */
+            /* Return false: the WebView must not create the window itself. The
+             * page keeps a dummy handle so its popup follow-up code survives. */
+            view.evaluateJavascript(POPUP_STUB_JS, null);
             return false;
         }
 

@@ -161,6 +161,7 @@ let appInfo = null;
 let downloadsCache = [];
 let downloadsUsage = { usedBytes: 0, totalBytes: 0 };
 let downloadsFilter = 'all';
+let storageReady = false;
 let isDashboardMode = true;
 let booting = true;
 let dashboardActive = true;
@@ -2417,12 +2418,17 @@ function updateDashboardStorage() {
   if (dom.dashboardStorage) {
     /* The header shows the short free-space figure; the full breakdown stays in
      * the tooltip so the value is still available on long-press/desktop. */
-    const short = total > 0 ? freeSpaceLabel(free) : '';
-    const detail = total > 0
-      ? formatBytes(free) + ' free of ' + formatBytes(total) + ' (' + formatBytes(used) + ' used)'
-      : (count ? count + (count === 1 ? ' download' : ' downloads') : 'Universal Media Downloader');
-    dom.dashboardStorage.textContent = short || detail;
-    dom.dashboardStorage.setAttribute('title', detail);
+    if (!storageReady) {
+      dom.dashboardStorage.textContent = 'Checking storage…';
+      dom.dashboardStorage.removeAttribute('title');
+    } else {
+      const short = total > 0 ? freeSpaceLabel(free) : '';
+      const detail = total > 0
+        ? formatBytes(free) + ' free of ' + formatBytes(total) + ' (' + formatBytes(used) + ' used)'
+        : (count ? count + (count === 1 ? ' download' : ' downloads') : 'Universal Media Downloader');
+      dom.dashboardStorage.textContent = short || detail;
+      dom.dashboardStorage.setAttribute('title', detail);
+    }
   }
   if (dom.dashboardStorageBar) {
     dom.dashboardStorageBar.setAttribute('aria-valuenow', String(Math.round(percent)));
@@ -2586,9 +2592,25 @@ function filenameFromUrl(url) {
 /* Raised by native for a tapped link (shouldOverrideUrlLoading) or a page that
  * starts a download (DownloadListener). Nothing is downloaded until the user
  * confirms here, and the size comes from a native HEAD probe. */
+function existingDownload(url) {
+  const target = String(url || '');
+  if (!target) return null;
+  return downloadsCache.find((item) => item && String(item.url || '') === target) || null;
+}
+
+/* Asking again about a URL that is already queued or paused only starts a
+ * second transfer of the same file. Point at the manager instead. */
+function alreadyDownloading(url) {
+  if (!existingDownload(url)) return false;
+  toast('Download already in progress');
+  if (!dashboardActive) showDashboard();
+  return true;
+}
+
 function showDownloadPrompt(data) {
   const url = String((data && data.url) || '');
   if (!isHttpUrl(url)) return;
+  if (alreadyDownloading(url)) return;
   const filename = String((data && data.filename) || '') || filenameFromUrl(url);
   const size = Number(data && data.size) || 0;
   const mime = String((data && data.mime) || '');
@@ -2640,6 +2662,7 @@ async function confirmDownloadPrompt() {
     });
     toast('Download started');
     if (dashboardActive) refreshDashboardDownloads();
+    else fetchDownloads();
   } catch (error) {
     toast('Could not start the download');
   }
@@ -2850,6 +2873,7 @@ function hideClipboardPrompt() {
 
 function showClipboardPrompt(url) {
   if (!dom.clipboardPrompt || !url) return;
+  if (alreadyDownloading(url)) return;
   clipboardPromptUrl = url;
   if (dom.clipboardPromptUrl) dom.clipboardPromptUrl.textContent = url;
   dom.clipboardPrompt.classList.add('show');
@@ -3012,7 +3036,9 @@ function showDashboard() {
   closeDownloadSheet();
   hideSuggestions();
   syncNativeVisibility();
-  refreshDashboardDownloads();
+  /* Paint the dashboard skeleton first; the native storage probe and the list
+   * read are IO and must not hold up the first frame. */
+  window.setTimeout(refreshDashboardDownloads, 0);
 }
 
 function leaveDashboard() {
@@ -3054,6 +3080,11 @@ async function submitDashboardUrl() {
     return;
   }
   if (dashboardBusy) return;
+  if (alreadyDownloading(url)) {
+    closeDownloadSheet();
+    if (input) input.value = '';
+    return;
+  }
   if (settings.wifiOnly && onMobileData()) {
     toast('Wi-Fi only is on — connect to Wi-Fi to download');
     return;
@@ -4097,6 +4128,7 @@ async function fetchDownloads() {
     downloadsCache = [];
     downloadsUsage = { usedBytes: 0, totalBytes: 0 };
   }
+  storageReady = true;
   updateDashboardSpeeds();
   rebuildTabDownloadIndex();
   return downloadsCache;
@@ -5498,6 +5530,14 @@ function attachNativeListeners() {
     if (overlays.has('siteInfo')) renderSiteInfo();
   });
 
+  listen('downloadsRestored', () => {
+    /* Native repaired stale records and restored paused rows in the background;
+     * the list has to be read again once that write finished. */
+    storageReady = false;
+    if (dashboardActive) refreshDashboardDownloads();
+    else fetchDownloads();
+  });
+
   listen('showDownloadPrompt', (data) => {
     if (!data || !data.url) return;
     showDownloadPrompt(data);
@@ -5890,7 +5930,6 @@ async function boot() {
   setLoading(false);
   updateTabBadge();
   refreshTabMedia();
-  fetchDownloads();
 
   if (App && typeof App.addListener === 'function') {
     App.addListener('backButton', () => {

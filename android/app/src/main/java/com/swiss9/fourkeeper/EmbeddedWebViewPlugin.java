@@ -22,6 +22,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
 import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.TypedValue;
 import android.view.MotionEvent;
@@ -79,6 +80,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -694,6 +696,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     /* Downloads currently served by the multi-threaded engine, so a cancel
      * from the downloads list can stop the worker threads. */
     private final Map<Long, MultiThreadDownloader> activeDownloaders = new ConcurrentHashMap<>();
+    /* Downloads the user paused: their workers are stopped but the record and
+     * the partial file stay, so the list can offer Resume. */
+    private final Set<Long> pausedDownloads = ConcurrentHashMap.newKeySet();
     private ActivityResultLauncher<String> createDocumentLauncher;
     private PendingDownload pendingDownload;
     private BroadcastReceiver downloadReceiver;
@@ -856,7 +861,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         settings.setTextZoom(textZoom);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(popupsEnabled);
-        settings.setSupportMultipleWindows(false);
+        /* Popups are intercepted in onCreateWindow and offered to the user
+         * instead of opening on their own, so the callback must be enabled. */
+        settings.setSupportMultipleWindows(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
@@ -1344,6 +1351,35 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         TabChromeClient(int tabId) {
             this.tabId = tabId;
+        }
+
+        /**
+         * A page asked for a popup (target=_blank or window.open). The window is
+         * never created: the shell asks the user first and opens a tab itself.
+         */
+        @Override
+        public boolean onCreateWindow(
+            WebView view,
+            boolean isDialog,
+            boolean isUserGesture,
+            android.os.Message resultMsg
+        ) {
+            String url = "";
+            WebView.HitTestResult hit = view.getHitTestResult();
+            if (hit != null && hit.getExtra() != null) url = hit.getExtra();
+            Uri target = Uri.parse(url);
+            String scheme = target.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                /* shortcut: window.open() with no tapped link has no URL until a
+                 * WebView is created for it; that popup stays blocked for now. */
+                return false;
+            }
+            JSObject data = new JSObject();
+            data.put("url", url);
+            data.put("tabId", tabId);
+            notifyListeners("newTabRequested", data);
+            /* Return false: the WebView must not create the window itself. */
+            return false;
         }
 
         @Override
@@ -2238,7 +2274,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 JSONObject record = records.optJSONObject(i);
                 if (record == null || !record.optBoolean("custom", false)) continue;
                 String status = record.optString("status", "");
-                if ("running".equals(status) || "pending".equals(status)) {
+                if ("running".equals(status) || "pending".equals(status) || "paused".equals(status)) {
                     try {
                         record.put("status", "failed");
                         changed = true;
@@ -2257,6 +2293,29 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (record != null && record.optLong("id", -1) == id) return record;
         }
         return null;
+    }
+
+    /** True when the record's file or SAF document still exists. */
+    private boolean uriExists(String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                String path = uri.getPath();
+                return path != null && new File(path).exists();
+            }
+            Cursor cursor = getContext()
+                .getContentResolver()
+                .query(uri, new String[] { OpenableColumns.SIZE }, null, null, null);
+            if (cursor == null) return false;
+            try {
+                return cursor.moveToFirst();
+            } finally {
+                cursor.close();
+            }
+        } catch (Exception error) {
+            return false;
+        }
     }
 
     private void updateCustomRecord(long id, String status, long bytes, long total) {
@@ -2603,8 +2662,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
             userAgent,
             cookie,
             (bytes, total) -> {
-                updateCustomRecord(id, "running", bytes, total);
-                notifyDownloadProgress(id, bytes, total, "running");
+                String status = pausedDownloads.contains(id) ? "paused" : "running";
+                updateCustomRecord(id, status, bytes, total);
+                notifyDownloadProgress(id, bytes, total, status);
             }
         );
         activeDownloaders.put(id, downloader);
@@ -2670,6 +2730,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
         } finally {
             activeDownloaders.remove(id);
+            pausedDownloads.remove(id);
         }
     }
 
@@ -2892,10 +2953,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 item.put("custom", record.optBoolean("custom", false));
 
                 if (record.optBoolean("custom", false)) {
-                    item.put("status", record.optString("status", "unknown"));
+                    String status = record.optString("status", "unknown");
+                    item.put("status", status);
                     item.put("bytes", record.optLong("bytes", 0));
                     item.put("totalBytes", record.optLong("totalBytes", 0));
-                    item.put("exists", record.optString("status", "").equals("successful"));
+                    item.put("uri", record.optString("uri", ""));
+                    /* A record that is still transferring owns its file: only a
+                     * finished one can point at a file the user deleted. */
+                    boolean active = "running".equals(status) || "pending".equals(status) || "paused".equals(status);
+                    item.put("exists", active || uriExists(record.optString("uri", "")));
                 } else if (manager != null) {
                     Cursor cursor = null;
                     try {
@@ -3014,6 +3080,132 @@ public class EmbeddedWebViewPlugin extends Plugin {
             call.reject("This download is not finished yet.");
             return;
         }
+        call.resolve();
+    }
+
+    /** Stops the worker threads but keeps the partial file for later resume. */
+    @PluginMethod
+    public void pauseDownload(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("A download id is required.");
+            return;
+        }
+        MultiThreadDownloader downloader = activeDownloaders.get(id);
+        if (downloader == null) {
+            call.reject("This download is not running.");
+            return;
+        }
+        pausedDownloads.add(id);
+        downloader.pause();
+        long bytes = downloader.getDownloadedBytes();
+        long total = downloader.getTotalBytes();
+        updateCustomRecord(id, "paused", bytes, total);
+        notifyDownloadProgress(id, bytes, total, "paused");
+        call.resolve();
+    }
+
+    /** Restarts the paused workers from the byte offsets they stopped at. */
+    @PluginMethod
+    public void resumeDownload(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("A download id is required.");
+            return;
+        }
+        MultiThreadDownloader downloader = activeDownloaders.get(id);
+        if (downloader == null) {
+            call.reject("This download can no longer be resumed.");
+            return;
+        }
+        pausedDownloads.remove(id);
+        downloader.resume();
+        long bytes = downloader.getDownloadedBytes();
+        long total = downloader.getTotalBytes();
+        updateCustomRecord(id, "running", bytes, total);
+        notifyDownloadProgress(id, bytes, total, "running");
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void shareDownload(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("A download id is required.");
+            return;
+        }
+        JSONObject record = findDownloadRecord(id);
+        if (record == null) {
+            call.reject("This download no longer exists.");
+            return;
+        }
+        try {
+            Uri uri = Uri.parse(record.optString("uri", ""));
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                uri = FileProvider.getUriForFile(
+                    getContext(),
+                    getContext().getPackageName() + ".fileprovider",
+                    new File(uri.getPath())
+                );
+            }
+            String mime = record.optString("mime", "");
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType(mime == null || mime.isEmpty() ? "*/*" : mime);
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(Intent.createChooser(intent, "Share file"));
+            call.resolve();
+        } catch (Exception error) {
+            call.reject("No app can share this file.");
+        }
+    }
+
+    /** Asks the system file browser for the download folder. */
+    @PluginMethod
+    public void openDownloadFolder(PluginCall call) {
+        File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
+        boolean opened = false;
+        try {
+            Uri uri = FileProvider.getUriForFile(
+                getContext(),
+                getContext().getPackageName() + ".fileprovider",
+                dir
+            );
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "resource/folder");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            opened = true;
+        } catch (Exception error) {
+            /* Android 11+ hides Android/data from file managers, so there may
+             * be no app to show the folder; the path is returned instead. */
+            opened = false;
+        }
+        JSObject result = new JSObject();
+        result.put("opened", opened);
+        result.put("path", dir.getAbsolutePath());
+        call.resolve(result);
+    }
+
+    /** Starts the record's URL again as a fresh download. */
+    @PluginMethod
+    public void redownload(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("A download id is required.");
+            return;
+        }
+        JSONObject record = findDownloadRecord(id);
+        String url = record == null ? "" : record.optString("url", "");
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            call.reject("This download has no link to repeat.");
+            return;
+        }
+        final String target = url;
+        final String filename = record.optString("filename", "");
+        final String mime = record.optString("mime", "");
+        getActivity().runOnUiThread(() -> startNativeDownload(target, filename, mime, "", activeTabId));
         call.resolve();
     }
 

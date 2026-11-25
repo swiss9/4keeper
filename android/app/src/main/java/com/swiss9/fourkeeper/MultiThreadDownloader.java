@@ -10,7 +10,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -62,6 +64,11 @@ public class MultiThreadDownloader {
     private volatile long totalBytes = -1L;
     private volatile long lastProgressAt = 0L;
     private volatile boolean cancelled = false;
+    private volatile boolean paused = false;
+    /** Bytes already written per chunk, so resume restarts at the right offset. */
+    private final Map<Integer, Long> chunkOffsets = new ConcurrentHashMap<>();
+    /** Bytes written by the single-stream fallback (used as its Range start). */
+    private volatile long streamBytes = 0L;
 
     public MultiThreadDownloader(
         String url,
@@ -107,6 +114,25 @@ public class MultiThreadDownloader {
         cancelled = true;
     }
 
+    public boolean isPaused() {
+        return paused;
+    }
+
+    /** Stops the workers where they are; the partial file stays on disk. */
+    public void pause() {
+        paused = true;
+    }
+
+    public void resume() {
+        paused = false;
+    }
+
+    /** Blocks the calling transfer thread while paused, cheaply. */
+    private void awaitResume() throws IOException {
+        while (paused && !cancelled) sleepQuietly(150L);
+        if (cancelled) throw new IOException("Cancelled");
+    }
+
     /**
      * Runs the whole transfer on the calling thread and blocks until the file
      * is complete. Call it from a background executor, never from the UI
@@ -126,20 +152,32 @@ public class MultiThreadDownloader {
 
         boolean completed = false;
         try {
-            if (cancelled) throw new IOException("Cancelled");
-            if (!probe.ranged || connections <= 1 || probe.length <= 0) {
-                downloadSingleStream(probe.url, probe.length);
-            } else {
+            while (true) {
+                if (cancelled) throw new IOException("Cancelled");
+                awaitResume();
                 try {
-                    downloadInChunks(probe.url, probe.length);
-                } catch (RangeUnsupportedException ignored) {
-                    /* Ranges were advertised but a chunk request came back as a
-                     * full 200 response. Start over with one connection. */
-                    downloaded.set(0L);
-                    downloadSingleStream(probe.url, probe.length);
+                    if (!probe.ranged || connections <= 1 || probe.length <= 0) {
+                        downloadSingleStream(probe.url, probe.length);
+                    } else {
+                        try {
+                            downloadInChunks(probe.url, probe.length);
+                        } catch (RangeUnsupportedException ignored) {
+                            /* Ranges were advertised but a chunk request came back
+                             * as a full 200 response. Start over with one link. */
+                            downloaded.set(0L);
+                            chunkOffsets.clear();
+                            streamBytes = 0L;
+                            downloadSingleStream(probe.url, probe.length);
+                        }
+                    }
+                    completed = true;
+                    break;
+                } catch (PausedException pauseSignal) {
+                    /* Workers kept the bytes they wrote; hold this thread here
+                     * so resume() can restart them from the saved offsets. */
+                    emit(downloaded.get(), totalBytes);
                 }
             }
-            completed = true;
         } finally {
             if (!completed) deletePartialFile();
         }
@@ -258,7 +296,12 @@ public class MultiThreadDownloader {
                 long start = index * chunkSize;
                 long end = Math.min(total - 1, start + chunkSize - 1);
                 if (start > end) break;
-                futures.add(pool.submit(new ChunkTask(targetUrl, start, end, total)));
+                /* A paused run left this chunk half written: re-request only
+                 * the bytes that are still missing. */
+                Long saved = chunkOffsets.get(index);
+                if (saved != null && saved > start) start = saved;
+                if (start > end) continue;
+                futures.add(pool.submit(new ChunkTask(targetUrl, index, start, end, total)));
             }
             pool.shutdown();
             while (!pool.awaitTermination(250L, TimeUnit.MILLISECONDS)) {
@@ -284,6 +327,7 @@ public class MultiThreadDownloader {
                 throw new IOException("Interrupted while downloading");
             } catch (ExecutionException error) {
                 Throwable cause = error.getCause();
+                if (cause instanceof PausedException) throw (PausedException) cause;
                 if (cause instanceof RangeUnsupportedException) {
                     throw (RangeUnsupportedException) cause;
                 }
@@ -303,12 +347,14 @@ public class MultiThreadDownloader {
     /** Downloads one byte range; each worker owns its own file handle. */
     private final class ChunkTask implements Callable<Void> {
         private final String targetUrl;
+        private final int index;
         private final long start;
         private final long end;
         private final long total;
 
-        ChunkTask(String targetUrl, long start, long end, long total) {
+        ChunkTask(String targetUrl, int index, long start, long end, long total) {
             this.targetUrl = targetUrl;
+            this.index = index;
             this.start = start;
             this.end = end;
             this.total = total;
@@ -338,12 +384,17 @@ public class MultiThreadDownloader {
                     int read;
                     while ((read = input.read(buffer)) != -1) {
                         if (cancelled) throw new IOException("Cancelled");
+                        if (paused) {
+                            chunkOffsets.put(index, position);
+                            throw new PausedException();
+                        }
                         long room = end - position + 1;
                         if (room <= 0) break;
                         if (read > room) read = (int) room;
                         file.write(buffer, 0, read);
                         position += read;
                         written += read;
+                        chunkOffsets.put(index, position);
                         report(downloaded.addAndGet(read), total);
                     }
                     if (position != end + 1) {
@@ -351,11 +402,15 @@ public class MultiThreadDownloader {
                             "Short range response (" + (position - start) + "/" + expected + ")"
                         );
                     }
+                    chunkOffsets.put(index, end + 1);
                     return null;
                 } catch (IOException error) {
+                    /* A pause keeps what was written: resume starts from there. */
+                    if (error instanceof PausedException) throw error;
                     /* Bytes written by the failed attempt must not be counted
                      * twice once the chunk restarts from its beginning. */
                     downloaded.addAndGet(-written);
+                    chunkOffsets.put(index, start);
                     lastError = error;
                     if (error instanceof RangeUnsupportedException) throw error;
                     if (cancelled) throw error;
@@ -377,28 +432,45 @@ public class MultiThreadDownloader {
         InputStream input = null;
         FileOutputStream output = null;
         try {
+            long resumeFrom = streamBytes;
             connection = open(targetUrl);
+            if (resumeFrom > 0) connection.setRequestProperty("Range", "bytes=" + resumeFrom + "-");
             int code = connection.getResponseCode();
+            if (resumeFrom > 0 && code == 200) {
+                /* The server ignored the Range header: start over. */
+                resumeFrom = 0L;
+                streamBytes = 0L;
+                connection.disconnect();
+                connection = open(targetUrl);
+                code = connection.getResponseCode();
+            }
             if (code < 200 || code >= 300) throw new IOException("HTTP " + code);
             long total = connection.getContentLengthLong();
             if (total <= 0) total = knownTotal;
+            if (resumeFrom > 0 && total > 0) total += resumeFrom;
             if (total <= 0) total = -1L;
             totalBytes = total;
 
-            output = new FileOutputStream(destination, false);
+            output = new FileOutputStream(destination, resumeFrom > 0);
             input = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
             byte[] buffer = new byte[BUFFER_SIZE];
-            long written = 0L;
+            long written = resumeFrom;
             int read;
             while ((read = input.read(buffer)) != -1) {
                 if (cancelled) throw new IOException("Cancelled");
+                if (paused) {
+                    streamBytes = written;
+                    throw new PausedException();
+                }
                 output.write(buffer, 0, read);
                 written += read;
+                streamBytes = written;
                 downloaded.set(written);
                 report(written, total);
             }
             output.flush();
             totalBytes = written;
+            streamBytes = 0L;
             emit(written, written);
         } finally {
             closeQuietly(input);
@@ -506,6 +578,13 @@ public class MultiThreadDownloader {
             this.url = url;
             this.length = length;
             this.ranged = ranged;
+        }
+    }
+
+    /** Internal signal: the transfer stopped on pause, not on failure. */
+    static final class PausedException extends IOException {
+        PausedException() {
+            super("Paused");
         }
     }
 

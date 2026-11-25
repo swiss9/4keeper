@@ -3839,36 +3839,52 @@ html.page-behind .browser {
 
 .prompt-sheet {
   z-index: 90;
+  gap: 12px;
+  padding: 4px 18px calc(16px + var(--safe-bottom));
 }
 
-.prompt-body {
-  padding: 4px 24px 18px;
-  text-align: center;
+.prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 2px 2px 0;
 }
 
 .prompt-icon {
   display: grid;
   place-items: center;
-  width: 58px;
-  height: 58px;
-  margin: 2px auto 14px;
-  border-radius: 19px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .prompt-icon .icon {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   stroke-width: 1.9;
 }
 
 .prompt-title {
-  margin: 0 0 10px;
-  font-size: 19px;
+  margin: 0;
+  font-size: 17px;
   font-weight: 660;
   letter-spacing: -0.015em;
   color: var(--text);
+}
+
+.prompt-file {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
 }
 
 .prompt-name {
@@ -3880,47 +3896,171 @@ html.page-behind .browser {
   word-break: break-word;
 }
 
-.prompt-meta {
-  margin: 7px 0 0;
+.prompt-details {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.prompt-size {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.prompt-sep {
+  opacity: 0.5;
+}
+
+.prompt-domain {
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 11.5px;
   letter-spacing: 0.02em;
-  color: var(--muted);
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prompt-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  padding: 4px 16px calc(16px + var(--safe-bottom));
 }
 
 .prompt-btn {
   height: 48px;
+  border: 1px solid transparent;
   border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
   transition: background-color 0.14s ease, opacity 0.14s ease;
 }
 
-.prompt-btn:active {
+.prompt-btn.is-secondary {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.prompt-btn.is-secondary:active {
   background: var(--surface-3);
+  color: var(--text);
 }
 
 .prompt-btn.is-primary {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--text);
+  color: var(--bg);
   font-weight: 650;
 }
 
 .prompt-btn.is-primary:active {
   opacity: 0.86;
+}
+
+/* ----------------------------------------------- Download actions sheet */
+
+.dl-menu-sheet {
+  z-index: 92;
+  gap: 8px;
+  padding: 4px 14px calc(14px + var(--safe-bottom));
+}
+
+.dl-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dl-menu-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.dl-menu-titles {
+  min-width: 0;
+}
+
+.dl-menu-name {
+  margin: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-menu-meta {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-menu-list {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+/* Scoped to the sheet: .dl-menu-item is also used by the sort popover. */
+.dl-menu-sheet .dl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  height: 46px;
+  padding: 0 10px;
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 550;
+  text-align: left;
+}
+
+.dl-menu-sheet .dl-menu-item > .icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.dl-menu-sheet .dl-menu-item:active {
+  background: var(--surface-2);
+}
+
+.dl-menu-sheet .dl-menu-item:disabled {
+  opacity: 0.38;
+}
+
+.dl-menu-sheet .dl-menu-item.is-danger {
+  color: var(--danger);
+}
+
+.dl-menu-sheet .dl-menu-item.is-danger > .icon {
+  color: var(--danger);
+}
+
+.dl-menu-sheet .dl-menu-item.is-danger:active {
+  background: var(--danger-soft);
 }
 
 /* -------------------------------------------- Long-press context menu */

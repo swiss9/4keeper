@@ -277,18 +277,38 @@
     <div id="downloadPromptBackdrop" class="backdrop"></div>
     <section id="downloadPrompt" class="sheet prompt-sheet" role="dialog" aria-modal="true" aria-label="Confirm download" aria-hidden="true">
       <div class="sheet-handle"></div>
-      <div class="prompt-body">
+      <div class="prompt-head">
         <span class="prompt-icon" aria-hidden="true">
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 21h14"/></svg>
         </span>
         <h2 class="prompt-title">Download this file?</h2>
+      </div>
+      <div class="prompt-file">
         <p id="downloadPromptName" class="prompt-name">file</p>
-        <p id="downloadPromptMeta" class="prompt-meta">File</p>
+        <p class="prompt-details">
+          <span id="downloadPromptSize" class="prompt-size">Size unknown</span>
+          <span class="prompt-sep" aria-hidden="true">·</span>
+          <span id="downloadPromptDomain" class="prompt-domain">unknown</span>
+        </p>
       </div>
       <div class="prompt-actions">
-        <button id="downloadPromptCancel" class="prompt-btn" type="button">Cancel</button>
+        <button id="downloadPromptCancel" class="prompt-btn is-secondary" type="button">Cancel</button>
         <button id="downloadPromptConfirm" class="prompt-btn is-primary" type="button">Download</button>
       </div>
+    </section>
+
+    <!-- Per-download actions -->
+    <div id="dlMenuBackdrop" class="backdrop"></div>
+    <section id="dlMenuSheet" class="sheet dl-menu-sheet" role="dialog" aria-modal="true" aria-label="Download actions" aria-hidden="true">
+      <div class="sheet-handle"></div>
+      <div class="dl-menu-head">
+        <span id="dlMenuIcon" class="dl-menu-icon" aria-hidden="true"></span>
+        <div class="dl-menu-titles">
+          <p id="dlMenuName" class="dl-menu-name">File</p>
+          <p id="dlMenuMeta" class="dl-menu-meta">File</p>
+        </div>
+      </div>
+      <div id="dlMenuList" class="dl-menu-list" role="menu"></div>
     </section>
 
     <!-- Custom long-press menu for links, images and video -->

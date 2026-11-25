@@ -137,7 +137,9 @@ const ICONS = {
   audio: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
   torrent: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/><path d="M12 8v8m-3-3 3 3 3-3"/>',
-  inbox: '<path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4Z"/>'
+  inbox: '<path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4Z"/>',
+  more: '<circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/>',
+  share: '<path d="M12 15V3"/><path d="m8 7 4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'
 };
 
 const svgIcon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
@@ -255,9 +257,16 @@ const dom = {
   downloadPrompt: $('downloadPrompt'),
   downloadPromptBackdrop: $('downloadPromptBackdrop'),
   downloadPromptName: $('downloadPromptName'),
-  downloadPromptMeta: $('downloadPromptMeta'),
+  downloadPromptSize: $('downloadPromptSize'),
+  downloadPromptDomain: $('downloadPromptDomain'),
   downloadPromptCancel: $('downloadPromptCancel'),
   downloadPromptConfirm: $('downloadPromptConfirm'),
+  dlMenuSheet: $('dlMenuSheet'),
+  dlMenuBackdrop: $('dlMenuBackdrop'),
+  dlMenuIcon: $('dlMenuIcon'),
+  dlMenuName: $('dlMenuName'),
+  dlMenuMeta: $('dlMenuMeta'),
+  dlMenuList: $('dlMenuList'),
   contextMenu: $('contextMenu'),
   dashboardMedia: $('dashboardMedia'),
   dashboardMediaList: $('dashboardMediaList'),
@@ -2133,6 +2142,10 @@ function downloadCategory(item) {
   return 'others';
 }
 
+function isPaused(item) {
+  return String((item && item.status) || '').toLowerCase() === 'paused';
+}
+
 function downloadStatusGroup(item) {
   const status = String((item && item.status) || '').toLowerCase();
   if (status === 'successful' || status === 'completed') return 'finished';
@@ -2185,6 +2198,12 @@ function dashboardMetaText(item, group) {
   const bytes = Number(item.bytes) || 0;
   const total = Number(item.totalBytes) || 0;
   if (group === 'downloading') {
+    if (isPaused(item)) {
+      const parts = ['Paused'];
+      if (total > 0) parts.push(formatBytes(bytes) + ' of ' + formatBytes(total));
+      else if (bytes > 0) parts.push(formatBytes(bytes) + ' downloaded');
+      return parts.join(' · ');
+    }
     /* Live row: speed first, then the full file size (the bar next to it owns
      * the percentage), so the row answers "how fast" and "how big" at a glance. */
     const speed = formatSpeed(dashboardSpeedFor(item));
@@ -2195,6 +2214,9 @@ function dashboardMetaText(item, group) {
     return parts.join(' · ');
   }
   if (group === 'finished') {
+    /* Only a finished record can own a file the user deleted; an active one is
+     * merely still writing it. */
+    if (item.exists === false) return 'File removed';
     const size = total > 0 ? total : bytes;
     return size > 0 ? formatBytes(size) : 'Downloaded';
   }
@@ -2309,14 +2331,15 @@ function dashboardRowMarkup(item) {
   const missing = item.exists === false;
   const canOpen = group === 'finished' && !missing;
   const dotClass = group === 'downloading' ? 'is-running' : group === 'finished' ? 'is-done' : group === 'error' ? 'is-error' : '';
-  const meta = missing ? 'File removed' : dashboardMetaText(item, group);
+  const meta = dashboardMetaText(item, group);
   const host = hostOf(item.url) || 'Direct link';
   const typeLabel = dashboardTypeLabel(item, category);
   const showProgress = group !== 'finished' && Number(item.totalBytes) > 0;
   const running = group === 'downloading';
+  const paused = isPaused(item);
   const id = escapeHtml(item.id);
   return `
-    <div class="dl-row" data-download-id="${id}" data-dl-group="${group}">
+    <div class="dl-row" data-download-id="${id}" data-dl-group="${group}" data-dl-paused="${paused ? '1' : '0'}">
       <span class="dl-row-icon" aria-hidden="true">${svgIcon(DASHBOARD_CATEGORY_ICONS[category] || 'file', 'icon icon-sm')}</span>
       <div class="dl-row-main">
         <div class="dl-row-name" title="${escapeHtml(item.filename || 'Download')}">${escapeHtml(item.filename || 'Download')}</div>
@@ -2341,10 +2364,12 @@ function dashboardRowMarkup(item) {
       <div class="dl-row-actions">
         ${
           running
-            ? `<button class="dl-row-btn is-danger" type="button" data-dashboard-cancel="${id}" aria-label="Stop download">${svgIcon('stop', 'icon icon-xs')}</button>`
-            : `<button class="dl-row-btn" type="button" data-dashboard-open="${id}" aria-label="Open download"${canOpen ? '' : ' disabled'}>${svgIcon('external', 'icon icon-xs')}</button>
-               <button class="dl-row-btn" type="button" data-dashboard-remove="${id}" aria-label="Remove download">${svgIcon('trash', 'icon icon-xs')}</button>`
+            ? paused
+              ? `<button class="dl-row-btn" type="button" data-dashboard-resume="${id}" aria-label="Resume download">${svgIcon('play', 'icon icon-xs')}</button>`
+              : `<button class="dl-row-btn" type="button" data-dashboard-pause="${id}" aria-label="Pause download">${svgIcon('pause', 'icon icon-xs')}</button>`
+            : `<button class="dl-row-btn" type="button" data-dashboard-open="${id}" aria-label="Open download"${canOpen ? '' : ' disabled'}>${svgIcon('external', 'icon icon-xs')}</button>`
         }
+        <button class="dl-row-btn" type="button" data-dashboard-menu="${id}" aria-label="More actions" aria-haspopup="dialog">${svgIcon('more', 'icon icon-xs')}</button>
       </div>
     </div>`;
 }
@@ -2455,14 +2480,16 @@ function updateDashboardProgress(data) {
   const row = dom.dashboardQueue.querySelector('[data-download-id="' + id + '"]');
   if (!row) return;
   const group = downloadStatusGroup(item);
-  if (row.getAttribute('data-dl-group') !== group) {
+  /* A pause or resume swaps the row's action button, so redraw the row instead
+   * of patching its text. */
+  if (row.getAttribute('data-dl-group') !== group || row.getAttribute('data-dl-paused') !== (isPaused(item) ? '1' : '0')) {
     renderDashboardQueue();
     return;
   }
   const meta = row.querySelector('[data-dl-meta]');
   if (meta) {
     updateDashboardSpeeds();
-    meta.textContent = item.exists === false ? 'File removed' : dashboardMetaText(item, group);
+    meta.textContent = dashboardMetaText(item, group);
   }
   const bar = row.querySelector('[data-dl-progress]');
   if (bar) {
@@ -2573,16 +2600,8 @@ function showDownloadPrompt(data) {
     tabId: Number.isFinite(Number(data && data.tabId)) ? Number(data.tabId) : activeTabId
   };
   if (dom.downloadPromptName) dom.downloadPromptName.textContent = filename;
-  if (dom.downloadPromptMeta) {
-    const parts = [size > 0 ? formatBytes(size) : 'Size unknown'];
-    const host = hostOf(url);
-    if (host) parts.push(host);
-    if (mime) {
-      const label = mime.split('/').pop().split(';')[0].trim().toUpperCase();
-      if (label && label !== '*') parts.push(label);
-    }
-    dom.downloadPromptMeta.textContent = parts.join(' · ');
-  }
+  if (dom.downloadPromptSize) dom.downloadPromptSize.textContent = size > 0 ? formatBytes(size) : 'Size unknown';
+  if (dom.downloadPromptDomain) dom.downloadPromptDomain.textContent = hostOf(url) || 'Direct link';
   closeContextMenu();
   overlays.add('downloadPrompt');
   if (dom.downloadPrompt) {
@@ -3974,13 +3993,15 @@ function closeBookmarks() {
 
 function downloadStatus(download) {
   const status = String(download.status || '').toLowerCase();
-  if (download.exists === false) return 'File removed';
-  if (status === 'successful' || status === 'completed') return 'Downloaded';
+  if (status === 'successful' || status === 'completed') {
+    return download.exists === false ? 'File removed' : 'Downloaded';
+  }
   if (status === 'running' || status === 'pending' || status === 'paused') {
     const total = Number(download.totalBytes) || 0;
     const done = Number(download.bytes) || 0;
-    if (total > 0) return formatBytes(done) + ' of ' + formatBytes(total);
-    return 'Downloading';
+    const active = status === 'paused' ? 'Paused' : 'Downloading';
+    if (total > 0) return active + ' · ' + formatBytes(done) + ' of ' + formatBytes(total);
+    return active;
   }
   if (status === 'failed') return 'Failed';
   return 'Saved';
@@ -4128,26 +4149,175 @@ async function removeDownloadFile(id) {
   loadDownloads();
 }
 
-/* The multi-threaded engine (MultiThreadDownloader) has no pause/resume: its
- * chunk workers write straight into the target file. Stopping is the honest
- * action, and it goes through removeDownload -> MultiThreadDownloader.cancel(),
- * never through Android's deprecated DownloadManager. */
-function stopDashboardDownload(id) {
-  cancelDashboardDownload(id);
+/* The engine keeps every chunk's byte offset, so a pause stops the workers and
+ * a resume asks the server for the rest of each range. The partial file stays. */
+async function pauseDashboardDownload(id) {
+  try {
+    await callPlugin('pauseDownload', { id });
+    toast('Download paused');
+  } catch (error) {
+    toast('Could not pause this download');
+  }
+  await refreshDashboardDownloads();
 }
 
-function cancelDashboardDownload(id) {
-  openDialog({
-    title: 'Stop this download?',
-    message: 'The transfer stops and the partial file is deleted.',
-    confirmLabel: 'Stop download',
-    cancelLabel: 'Keep downloading',
-    destructive: true,
-    onConfirm: async () => {
-      await removeDownloadFile(id);
-      await refreshDashboardDownloads();
+async function resumeDashboardDownload(id) {
+  try {
+    await callPlugin('resumeDownload', { id });
+    toast('Download resumed');
+  } catch (error) {
+    toast('Could not resume this download');
+  }
+  await refreshDashboardDownloads();
+}
+
+/* ------------------------------------------- Per-download actions (⋮) */
+
+let downloadMenuId = -1;
+
+function downloadMenuItems(item, group) {
+  const canOpen = group === 'finished' && item.exists !== false;
+  return [
+    { action: 'open', label: 'Open', icon: 'external', disabled: !canOpen },
+    { action: 'share', label: 'Share', icon: 'share', disabled: !canOpen },
+    { action: 'folder', label: 'Open folder', icon: 'folder' },
+    { action: 'redownload', label: 'Redownload', icon: 'history' },
+    { action: 'copy', label: 'Copy download link', icon: 'link' },
+    { action: 'properties', label: 'Properties', icon: 'info' },
+    { action: 'remove', label: 'Remove', icon: 'trash', danger: true }
+  ];
+}
+
+function openDownloadMenu(id) {
+  const item = downloadsCache.find((entry) => Number(entry.id) === Number(id));
+  if (!item) return;
+  const group = downloadStatusGroup(item);
+  const category = downloadCategory(item);
+  downloadMenuId = Number(item.id);
+  if (dom.dlMenuIcon) dom.dlMenuIcon.innerHTML = svgIcon(DASHBOARD_CATEGORY_ICONS[category] || 'file', 'icon icon-sm');
+  if (dom.dlMenuName) dom.dlMenuName.textContent = item.filename || 'Download';
+  if (dom.dlMenuMeta) {
+    const total = Number(item.totalBytes) || 0;
+    dom.dlMenuMeta.textContent = [
+      hostOf(item.url) || 'Direct link',
+      dashboardTypeLabel(item, category),
+      total > 0 ? formatBytes(total) : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  if (dom.dlMenuList) {
+    dom.dlMenuList.innerHTML = downloadMenuItems(item, group)
+      .map(
+        (entry) => `
+        <button class="dl-menu-item${entry.danger ? ' is-danger' : ''}" type="button" role="menuitem" data-dl-menu-action="${entry.action}"${entry.disabled ? ' disabled' : ''}>
+          ${svgIcon(entry.icon, 'icon icon-sm')}
+          <span>${escapeHtml(entry.label)}</span>
+        </button>`
+      )
+      .join('');
+  }
+  overlays.add('downloadMenu');
+  if (dom.dlMenuSheet) {
+    dom.dlMenuSheet.classList.add('open');
+    dom.dlMenuSheet.setAttribute('aria-hidden', 'false');
+  }
+  if (dom.dlMenuBackdrop) dom.dlMenuBackdrop.classList.add('open');
+  syncNativeVisibility();
+}
+
+function closeDownloadMenu() {
+  const wasOpen = overlays.has('downloadMenu');
+  overlays.delete('downloadMenu');
+  downloadMenuId = -1;
+  if (dom.dlMenuSheet) {
+    dom.dlMenuSheet.classList.remove('open');
+    dom.dlMenuSheet.setAttribute('aria-hidden', 'true');
+  }
+  if (dom.dlMenuBackdrop) dom.dlMenuBackdrop.classList.remove('open');
+  if (wasOpen) syncNativeVisibility();
+}
+
+async function handleDownloadMenuAction(action) {
+  const id = downloadMenuId;
+  const item = downloadsCache.find((entry) => Number(entry.id) === id);
+  closeDownloadMenu();
+  if (!item) return;
+
+  if (action === 'open') {
+    openDownloadFile(id);
+    return;
+  }
+  if (action === 'share') {
+    try {
+      await callPlugin('shareDownload', { id });
+    } catch (error) {
+      toast('No app can share this file');
     }
-  });
+    return;
+  }
+  if (action === 'folder') {
+    try {
+      const result = await callPlugin('openDownloadFolder');
+      if (result && result.opened === false && result.path) toast('Folder: ' + result.path);
+    } catch (error) {
+      toast('Could not open the download folder');
+    }
+    return;
+  }
+  if (action === 'redownload') {
+    try {
+      await callPlugin('redownload', { id });
+      toast('Download restarted');
+    } catch (error) {
+      toast('Could not restart this download');
+    }
+    await refreshDashboardDownloads();
+    return;
+  }
+  if (action === 'copy') {
+    copyTextToClipboard(item.url, 'Download link copied');
+    return;
+  }
+  if (action === 'properties') {
+    const saved = Number(item.timestamp) || 0;
+    const rows = [
+      ['Status', downloadStatus(item)],
+      ['Size', Number(item.totalBytes) > 0 ? formatBytes(Number(item.totalBytes)) : 'Unknown'],
+      ['Downloaded', formatBytes(Number(item.bytes) || 0)],
+      ['Host', hostOf(item.url) || 'Direct link'],
+      ['Saved', saved > 0 ? new Date(saved).toLocaleString() : 'Unknown'],
+      ['Link', String(item.url || 'Unknown')]
+    ];
+    openDialog({
+      title: item.filename || 'Download',
+      confirmLabel: 'Close',
+      singleAction: true,
+      body: rows
+        .map(
+          ([label, value]) => `
+          <div class="site-info-row">
+            <span class="site-info-label">${escapeHtml(label)}</span>
+            <span class="site-info-value">${escapeHtml(value)}</span>
+          </div>`
+        )
+        .join('')
+    });
+    return;
+  }
+  if (action === 'remove') {
+    const active = downloadStatusGroup(item) === 'downloading';
+    openDialog({
+      title: 'Remove this download?',
+      message: active ? 'The transfer stops and the partial file is deleted.' : 'The file is deleted from storage.',
+      confirmLabel: 'Remove',
+      destructive: true,
+      onConfirm: async () => {
+        await removeDownloadFile(id);
+        await refreshDashboardDownloads();
+      }
+    });
+  }
 }
 
 /* ------------------------------------------------------------- Site info */
@@ -4834,21 +5004,17 @@ function attachUiListeners() {
       }
       const pauseButton = event.target.closest('[data-dashboard-pause]');
       if (pauseButton) {
-        /* Legacy markup from an older render: route it to the same stop path
-         * instead of the removed pause handler. */
-        stopDashboardDownload(Number(pauseButton.getAttribute('data-dashboard-pause')));
+        pauseDashboardDownload(Number(pauseButton.getAttribute('data-dashboard-pause')));
         return;
       }
-      const cancelButton = event.target.closest('[data-dashboard-cancel]');
-      if (cancelButton) {
-        cancelDashboardDownload(Number(cancelButton.getAttribute('data-dashboard-cancel')));
+      const resumeButton = event.target.closest('[data-dashboard-resume]');
+      if (resumeButton) {
+        resumeDashboardDownload(Number(resumeButton.getAttribute('data-dashboard-resume')));
         return;
       }
-      const removeButton = event.target.closest('[data-dashboard-remove]');
-      if (removeButton) {
-        removeDownloadFile(Number(removeButton.getAttribute('data-dashboard-remove'))).then(() => {
-          refreshDashboardDownloads();
-        });
+      const menuButton = event.target.closest('[data-dashboard-menu]');
+      if (menuButton) {
+        openDownloadMenu(Number(menuButton.getAttribute('data-dashboard-menu')));
         return;
       }
       const resetButton = event.target.closest('[data-dashboard-reset]');
@@ -4893,6 +5059,14 @@ function attachUiListeners() {
   if (dom.downloadPromptCancel) dom.downloadPromptCancel.addEventListener('click', closeDownloadPrompt);
   if (dom.downloadPromptConfirm) dom.downloadPromptConfirm.addEventListener('click', confirmDownloadPrompt);
   if (dom.downloadPromptBackdrop) dom.downloadPromptBackdrop.addEventListener('click', closeDownloadPrompt);
+  if (dom.dlMenuBackdrop) dom.dlMenuBackdrop.addEventListener('click', closeDownloadMenu);
+  if (dom.dlMenuList) {
+    dom.dlMenuList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-dl-menu-action]');
+      if (!button || button.disabled) return;
+      handleDownloadMenuAction(button.getAttribute('data-dl-menu-action'));
+    });
+  }
   if (dom.contextMenu) {
     dom.contextMenu.addEventListener('click', (event) => {
       const button = event.target.closest('[data-ctx-action]');
@@ -5329,6 +5503,20 @@ function attachNativeListeners() {
     showDownloadPrompt(data);
   });
 
+  /* A page asked for a popup window. Native blocks the window itself and asks
+   * here instead, so no tab opens without the user's word. */
+  listen('newTabRequested', (data) => {
+    const url = String((data && data.url) || '');
+    if (!isHttpUrl(url) || overlays.has('dialog')) return;
+    openDialog({
+      title: 'Open link in new tab?',
+      message: hostOf(url) || url,
+      confirmLabel: 'Open',
+      cancelLabel: 'Cancel',
+      onConfirm: () => createTabWithUrl(url, true)
+    });
+  });
+
   listen('contextMenuRequest', (data) => {
     if (!data) return;
     showContextMenu(data);
@@ -5493,6 +5681,10 @@ function handleBack() {
   }
   if (overlays.has('contextMenu')) {
     closeContextMenu();
+    return true;
+  }
+  if (overlays.has('downloadMenu')) {
+    closeDownloadMenu();
     return true;
   }
   if (overlays.has('downloadPrompt')) {

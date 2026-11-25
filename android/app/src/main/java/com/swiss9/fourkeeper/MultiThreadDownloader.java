@@ -2,12 +2,14 @@ package com.swiss9.fourkeeper;
 
 import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +22,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Splits one remote file into byte ranges and downloads them in parallel.
@@ -52,6 +56,8 @@ public class MultiThreadDownloader {
     private static final int MAX_RETRIES = 3;
     private static final int BUFFER_SIZE = 32 * 1024;
     private static final long PROGRESS_INTERVAL_MS = 250L;
+    /** One writer at a time for the shared resume file. */
+    private static final Object STATE_LOCK = new Object();
 
     private final String url;
     private final File destination;
@@ -69,6 +75,16 @@ public class MultiThreadDownloader {
     private final Map<Integer, Long> chunkOffsets = new ConcurrentHashMap<>();
     /** Bytes written by the single-stream fallback (used as its Range start). */
     private volatile long streamBytes = 0L;
+    /** Resume store: the JSON file and this transfer's id inside it. */
+    private File stateStore;
+    private long stateId = -1L;
+    /** Offsets read back from the store, applied once the server size is known. */
+    private JSONArray savedOffsets;
+    private long savedTotal = -1L;
+    private int savedConnections = 0;
+    private long savedStreamBytes = 0L;
+    /** A shutdown keeps the partial file so the next launch can continue it. */
+    private volatile boolean preservePartial = false;
 
     public MultiThreadDownloader(
         String url,
@@ -124,7 +140,18 @@ public class MultiThreadDownloader {
     }
 
     public void resume() {
+        /* A downloader rebuilt after a restart has no offsets in memory yet: read
+         * them back so the workers re-issue their Range headers from there. */
+        if (chunkOffsets.isEmpty() && streamBytes == 0L) restoreState();
         paused = false;
+        saveState();
+    }
+
+    /** Stops the workers without discarding the file and saves the offsets. */
+    public void suspend() {
+        preservePartial = true;
+        paused = true;
+        saveState();
     }
 
     /** Blocks the calling transfer thread while paused, cheaply. */
@@ -145,10 +172,12 @@ public class MultiThreadDownloader {
         if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
             throw new IOException("Cannot create the download folder");
         }
-        emit(0L, -1L);
+        emit(downloaded.get(), totalBytes);
 
         Probe probe = probe();
         if (probe.length > 0) totalBytes = probe.length;
+        applySavedState();
+        if (downloaded.get() > 0) emit(downloaded.get(), totalBytes);
 
         boolean completed = false;
         try {
@@ -175,11 +204,17 @@ public class MultiThreadDownloader {
                 } catch (PausedException pauseSignal) {
                     /* Workers kept the bytes they wrote; hold this thread here
                      * so resume() can restart them from the saved offsets. */
+                    saveState();
                     emit(downloaded.get(), totalBytes);
                 }
             }
         } finally {
-            if (!completed) deletePartialFile();
+            if (completed) {
+                clearState();
+            } else if (!preservePartial) {
+                deletePartialFile();
+                clearState();
+            }
         }
     }
 
@@ -403,6 +438,7 @@ public class MultiThreadDownloader {
                         );
                     }
                     chunkOffsets.put(index, end + 1);
+                    saveState();
                     return null;
                 } catch (IOException error) {
                     /* A pause keeps what was written: resume starts from there. */
@@ -476,6 +512,176 @@ public class MultiThreadDownloader {
             closeQuietly(input);
             closeQuietly(output);
             if (connection != null) connection.disconnect();
+        }
+    }
+
+    /* --------------------------------------------------------- resume store */
+
+    /** Binds this transfer to a resume file so a restart can continue it. */
+    public void bindState(long id, File store) {
+        this.stateId = id;
+        this.stateStore = store;
+        restoreState();
+    }
+
+    /** Serializes url, file, size, connections and the chunk offsets to disk. */
+    public void saveState() {
+        if (stateStore == null || stateId < 0 || destination == null) return;
+        try {
+            JSONObject state = new JSONObject();
+            state.put("id", stateId);
+            state.put("url", url);
+            state.put("file", destination.getAbsolutePath());
+            state.put("totalBytes", totalBytes);
+            state.put("connections", connections);
+            state.put("streamBytes", streamBytes);
+            JSONArray offsets = new JSONArray();
+            int parts = chunkParts(totalBytes);
+            for (int index = 0; index < parts; index++) {
+                Long position = chunkOffsets.get(index);
+                offsets.put(position == null ? 0L : position);
+            }
+            state.put("offsets", offsets);
+            writeState(stateStore, stateId, state);
+        } catch (Exception ignored) {
+            /* A failed save only costs a restart's worth of progress. */
+        }
+    }
+
+    /** Forgets this transfer, so a finished file is never offered for resume. */
+    public void clearState() {
+        clearState(stateStore, stateId);
+    }
+
+    /** Drops a saved transfer, e.g. when the user deletes the download. */
+    public static void clearState(File store, long id) {
+        if (store == null) return;
+        synchronized (STATE_LOCK) {
+            JSONArray states = readStatesLocked(store);
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < states.length(); i++) {
+                JSONObject entry = states.optJSONObject(i);
+                if (entry == null || entry.optLong("id", -1) == id) continue;
+                kept.put(entry);
+            }
+            writeStatesLocked(store, kept);
+        }
+    }
+
+    /** Every saved resume point, oldest first. */
+    public static JSONArray readStates(File store) {
+        if (store == null) return new JSONArray();
+        synchronized (STATE_LOCK) {
+            return readStatesLocked(store);
+        }
+    }
+
+    /** Bytes a saved transfer already had on disk. */
+    public static long savedBytes(JSONObject state) {
+        if (state == null) return 0L;
+        long total = state.optLong("totalBytes", -1L);
+        long streamed = Math.max(0L, state.optLong("streamBytes", 0L));
+        return savedBytes(total, state.optInt("connections", 1), state.optJSONArray("offsets")) + streamed;
+    }
+
+    private void restoreState() {
+        if (stateStore == null || stateId < 0) return;
+        synchronized (STATE_LOCK) {
+            JSONArray states = readStatesLocked(stateStore);
+            for (int i = 0; i < states.length(); i++) {
+                JSONObject entry = states.optJSONObject(i);
+                if (entry == null || entry.optLong("id", -1) != stateId) continue;
+                savedTotal = entry.optLong("totalBytes", -1L);
+                savedConnections = entry.optInt("connections", connections);
+                savedOffsets = entry.optJSONArray("offsets");
+                savedStreamBytes = Math.max(0L, entry.optLong("streamBytes", 0L));
+                downloaded.set(savedBytes(savedTotal, savedConnections, savedOffsets) + savedStreamBytes);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Turns the saved offsets into live resume points once the server size is
+     * known. A different size or connection count means the file changed, so
+     * the stale offsets are dropped rather than written at the wrong place.
+     */
+    private void applySavedState() {
+        JSONArray offsets = savedOffsets;
+        savedOffsets = null;
+        if (offsets == null) return;
+        boolean sameFile = savedTotal == totalBytes
+            && savedConnections == connections
+            && destination != null
+            && destination.exists()
+            && destination.length() > 0;
+        if (!sameFile) {
+            chunkOffsets.clear();
+            streamBytes = 0L;
+            savedStreamBytes = 0L;
+            downloaded.set(0L);
+            return;
+        }
+        int parts = chunkParts(totalBytes);
+        long chunkSize = parts <= 0 ? 0L : (totalBytes + parts - 1) / parts;
+        for (int index = 0; index < offsets.length() && index < parts; index++) {
+            long position = offsets.optLong(index, 0L);
+            if (position > index * chunkSize) chunkOffsets.put(index, position);
+        }
+        streamBytes = savedStreamBytes;
+        savedStreamBytes = 0L;
+        downloaded.set(savedBytes(totalBytes, connections, offsets) + streamBytes);
+    }
+
+    private int chunkParts(long total) {
+        if (total <= 0) return 0;
+        return (int) Math.min(connections, total);
+    }
+
+    private static long savedBytes(long total, int connections, JSONArray offsets) {
+        if (total <= 0 || offsets == null) return 0L;
+        int parts = (int) Math.min(Math.max(connections, 1), total);
+        long chunkSize = (total + parts - 1) / parts;
+        long written = 0L;
+        for (int index = 0; index < offsets.length() && index < parts; index++) {
+            long start = index * chunkSize;
+            long position = offsets.optLong(index, 0L);
+            if (position > start) written += Math.min(position, total) - start;
+        }
+        return written;
+    }
+
+    private static JSONArray readStatesLocked(File store) {
+        try (FileInputStream input = new FileInputStream(store)) {
+            long size = Math.min(store.length(), 1 << 20);
+            if (size <= 0) return new JSONArray();
+            byte[] buffer = new byte[(int) size];
+            int read = input.read(buffer);
+            if (read <= 0) return new JSONArray();
+            return new JSONArray(new String(buffer, 0, read, StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            return new JSONArray();
+        }
+    }
+
+    private static void writeState(File store, long id, JSONObject state) {
+        synchronized (STATE_LOCK) {
+            JSONArray states = readStatesLocked(store);
+            JSONArray merged = new JSONArray();
+            for (int i = 0; i < states.length(); i++) {
+                JSONObject entry = states.optJSONObject(i);
+                if (entry == null || entry.optLong("id", -1) == id) continue;
+                merged.put(entry);
+            }
+            merged.put(state);
+            writeStatesLocked(store, merged);
+        }
+    }
+
+    private static void writeStatesLocked(File store, JSONArray states) {
+        try (FileOutputStream output = new FileOutputStream(store)) {
+            output.write(states.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
         }
     }
 

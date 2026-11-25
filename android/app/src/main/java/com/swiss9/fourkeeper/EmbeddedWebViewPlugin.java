@@ -699,6 +699,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     /* Downloads the user paused: their workers are stopped but the record and
      * the partial file stay, so the list can offer Resume. */
     private final Set<Long> pausedDownloads = ConcurrentHashMap.newKeySet();
+    /* Paused progress survives the process: the engine rewrites this file on
+     * every pause and chunk completion, and load() turns it back into rows. */
+    private File downloadStateFile;
     private ActivityResultLauncher<String> createDocumentLauncher;
     private PendingDownload pendingDownload;
     private BroadcastReceiver downloadReceiver;
@@ -751,10 +754,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         downloadExecutor = Executors.newFixedThreadPool(4);
         probeExecutor = Executors.newSingleThreadExecutor();
+        downloadStateFile = new File(getContext().getFilesDir(), "paused_downloads.json");
         registerDownloadWatcher();
         registerCreateDocumentLauncher();
         makeBridgeTransparent();
         markStaleDownloads();
+        restorePausedDownloads();
     }
 
     private void makeBridgeTransparent() {
@@ -2286,6 +2291,60 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
+    /**
+     * Turns transfers that a process death interrupted back into paused rows
+     * with their saved byte counts. Nothing is restarted here: the list offers
+     * Resume, which continues from the offsets the engine wrote to disk.
+     */
+    private void restorePausedDownloads() {
+        JSONArray states = MultiThreadDownloader.readStates(downloadStateFile);
+        if (states.length() == 0) return;
+        synchronized (downloadRecordLock) {
+            JSONArray records = readDownloadRecords();
+            boolean changed = false;
+            for (int i = 0; i < states.length(); i++) {
+                JSONObject state = states.optJSONObject(i);
+                if (state == null) continue;
+                long id = state.optLong("id", -1);
+                String path = state.optString("file", "");
+                File file = path.isEmpty() ? null : new File(path);
+                if (id < 0 || file == null || !file.exists() || file.length() <= 0) continue;
+                long total = state.optLong("totalBytes", 0);
+                long bytes = MultiThreadDownloader.savedBytes(state);
+                JSONObject record = null;
+                for (int j = 0; j < records.length(); j++) {
+                    JSONObject entry = records.optJSONObject(j);
+                    if (entry != null && entry.optLong("id", -1) == id) {
+                        record = entry;
+                        break;
+                    }
+                }
+                try {
+                    if (record == null) {
+                        if (bytes <= 0) continue;
+                        record = new JSONObject();
+                        record.put("id", id);
+                        record.put("filename", file.getName());
+                        record.put("url", state.optString("url", ""));
+                        record.put("mime", "");
+                        record.put("timestamp", System.currentTimeMillis());
+                        record.put("tabId", -1);
+                        record.put("custom", true);
+                        record.put("uri", Uri.fromFile(file).toString());
+                        records.put(record);
+                    }
+                    record.put("connections", state.optInt("connections", connectionsPerFile));
+                    record.put("status", "paused");
+                    record.put("bytes", bytes);
+                    record.put("totalBytes", total > 0 ? total : bytes);
+                    changed = true;
+                } catch (Exception ignored) {
+                }
+            }
+            if (changed) writeDownloadRecords(records);
+        }
+    }
+
     private JSONObject findDownloadRecord(long id) {
         JSONArray records = readDownloadRecords();
         for (int i = records.length() - 1; i >= 0; i--) {
@@ -2661,17 +2720,34 @@ public class EmbeddedWebViewPlugin extends Plugin {
             threads,
             userAgent,
             cookie,
-            (bytes, total) -> {
-                String status = pausedDownloads.contains(id) ? "paused" : "running";
-                updateCustomRecord(id, status, bytes, total);
-                notifyDownloadProgress(id, bytes, total, status);
-            }
+            progressListener(id)
         );
-        activeDownloaders.put(id, downloader);
+        downloader.bindState(id, downloadStateFile);
+        scheduleNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+    }
 
-        Runnable job = () -> runNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+    /** Keeps the download record and the list in step with the engine. */
+    private MultiThreadDownloader.Listener progressListener(long id) {
+        return (bytes, total) -> {
+            String status = pausedDownloads.contains(id) ? "paused" : "running";
+            updateCustomRecord(id, status, bytes, total);
+            notifyDownloadProgress(id, bytes, total, status);
+        };
+    }
+
+    private void scheduleNativeDownload(
+        long id,
+        File target,
+        String name,
+        String mime,
+        String url,
+        int sourceTabId,
+        MultiThreadDownloader downloader
+    ) {
+        activeDownloaders.put(id, downloader);
+        Runnable job = () -> runNativeDownload(id, target, name, mime, url, sourceTabId, downloader);
         if (downloadExecutor == null) {
-            runNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+            job.run();
             return;
         }
         if (parallelDownloads) {
@@ -2697,7 +2773,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         long bytes = 0;
         long total = 0;
         try {
-            updateCustomRecord(id, "running", 0, 0);
+            updateCustomRecord(id, "running", downloader.getDownloadedBytes(), downloader.getTotalBytes());
             downloader.download();
             bytes = downloader.getDownloadedBytes();
             total = downloader.getTotalBytes();
@@ -3098,6 +3174,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
         pausedDownloads.add(id);
         downloader.pause();
+        downloader.saveState();
         long bytes = downloader.getDownloadedBytes();
         long total = downloader.getTotalBytes();
         updateCustomRecord(id, "paused", bytes, total);
@@ -3115,7 +3192,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
         MultiThreadDownloader downloader = activeDownloaders.get(id);
         if (downloader == null) {
-            call.reject("This download can no longer be resumed.");
+            if (!resumeSavedDownload(id)) {
+                call.reject("This download can no longer be resumed.");
+                return;
+            }
+            call.resolve();
             return;
         }
         pausedDownloads.remove(id);
@@ -3125,6 +3206,40 @@ public class EmbeddedWebViewPlugin extends Plugin {
         updateCustomRecord(id, "running", bytes, total);
         notifyDownloadProgress(id, bytes, total, "running");
         call.resolve();
+    }
+
+    /**
+     * Continues a download that only exists as a saved record and a partial
+     * file, i.e. after the app process was killed. The engine reads its chunk
+     * offsets from the resume store and re-issues the Range headers from them.
+     */
+    private boolean resumeSavedDownload(long id) {
+        JSONObject record = findDownloadRecord(id);
+        if (record == null || !record.optBoolean("custom", false)) return false;
+        String url = record.optString("url", "");
+        String uriValue = record.optString("uri", "");
+        if (!uriValue.startsWith("file:")) return false;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
+        File target = new File(Uri.parse(uriValue).getPath());
+        if (!target.exists() || target.length() <= 0) return false;
+        String name = record.optString("filename", target.getName());
+        String mime = record.optString("mime", "");
+        int threads = MultiThreadDownloader.normalizeConnections(
+            record.optInt("connections", connectionsPerFile)
+        );
+        String cookie = CookieManager.getInstance().getCookie(url);
+        MultiThreadDownloader downloader = new MultiThreadDownloader(
+            url,
+            target,
+            threads,
+            "",
+            cookie,
+            progressListener(id)
+        );
+        downloader.bindState(id, downloadStateFile);
+        pausedDownloads.remove(id);
+        scheduleNativeDownload(id, target, name, mime, url, record.optInt("tabId", -1), downloader);
+        return true;
     }
 
     @PluginMethod
@@ -3220,6 +3335,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (record != null && record.optBoolean("custom", false)) {
             MultiThreadDownloader active = activeDownloaders.remove(id);
             if (active != null) active.cancel();
+            MultiThreadDownloader.clearState(downloadStateFile, id);
             String uriValue = record.optString("uri", "");
             if (!uriValue.isEmpty()) {
                 try {
@@ -3275,6 +3391,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
             downloadReceiver = null;
         }
+        for (MultiThreadDownloader downloader : activeDownloaders.values()) {
+            /* Paused progress is written to disk and the partial file is kept:
+             * the next launch lists these rows as paused and can resume them. */
+            downloader.suspend();
+        }
+        activeDownloaders.clear();
         if (downloadExecutor != null) {
             downloadExecutor.shutdownNow();
             downloadExecutor = null;
@@ -3283,10 +3405,6 @@ public class EmbeddedWebViewPlugin extends Plugin {
             probeExecutor.shutdownNow();
             probeExecutor = null;
         }
-        for (MultiThreadDownloader downloader : activeDownloaders.values()) {
-            downloader.cancel();
-        }
-        activeDownloaders.clear();
         for (Integer id : new ArrayList<>(tabs.keySet())) {
             destroyTab(tabs.remove(id));
         }

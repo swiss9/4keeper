@@ -35,6 +35,10 @@
   --card-premium-border: rgba(255, 255, 255, 0.09);
   --btn-premium: #ffffff;
   --btn-premium-fg: #0a0a0b;
+  /* Quick Access squircle tiles */
+  --qa-bg: #1a1a1a;
+  --qa-fg: #f4f4f5;
+  --qa-border: rgba(255, 255, 255, 0.06);
   --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
@@ -65,6 +69,9 @@
   --card-premium-border: rgba(17, 17, 20, 0.1);
   --btn-premium: #111114;
   --btn-premium-fg: #ffffff;
+  --qa-bg: #ffffff;
+  --qa-fg: #111114;
+  --qa-border: #e4e4e8;
 }
 
 [data-theme="amoled"] {
@@ -78,6 +85,7 @@
   --border-strong: #303038;
   --sheet-premium: #0b0b0d;
   --field-premium: #17171a;
+  --qa-bg: #121215;
 }
 
 [data-density="compact"] {
@@ -413,6 +421,157 @@ select {
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------- Quick access */
+
+.quick-access {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 14px 0 6px;
+}
+
+.qa-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  color: var(--text-2);
+}
+
+.qa-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 20px;
+  background: var(--qa-bg);
+  border: 1px solid var(--qa-border);
+  color: var(--qa-fg);
+  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.qa-tile:active .qa-icon {
+  transform: scale(0.94);
+}
+
+.qa-glyph {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.qa-letter {
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.qa-icon--youtube {
+  color: #ff2d55;
+}
+
+.qa-icon--instagram {
+  color: #e1306c;
+}
+
+.qa-icon--custom {
+  color: var(--text-2);
+}
+
+.qa-icon--add {
+  color: var(--muted);
+}
+
+.qa-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+/* -------------------------------------------------------- New tab page */
+
+.new-tab {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px 20px calc(28px + var(--safe-bottom));
+  background: var(--bg);
+  overflow-y: auto;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.new-tab.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.new-tab-logo {
+  width: auto;
+  height: 78px;
+  object-fit: contain;
+}
+
+.new-tab-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 460px;
+  height: 54px;
+  padding: 0 18px;
+  background: var(--qa-bg);
+  border: 1px solid var(--qa-border);
+  border-radius: 999px;
+  color: var(--muted);
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.new-tab-search:focus-within {
+  background: var(--surface-2);
+  border-color: var(--field-premium-border);
+  color: var(--text-2);
+}
+
+.new-tab-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.new-tab-input::placeholder {
+  color: var(--muted);
+}
+
+.quick-access.is-newtab {
+  width: 100%;
+  max-width: 420px;
+  padding: 0;
+}
+
 /* ------------------------------------------------------------- Dashboard */
 
 .dashboard-screen {
@@ -464,37 +623,32 @@ select {
 .dl-topbar-brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0 4px 0 2px;
+  padding: 0 8px;
+  text-align: center;
 }
 
 .dl-brand-meta {
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.dl-logo {
-  flex: 0 0 auto;
-  height: 52px;
-  width: auto;
-  border-radius: 12px;
-  object-fit: contain;
-}
-
-/* Short free-space readout that sits with the enlarged logo. */
+/* Header logo was removed: the splash screen owns the branding. */
 .dl-storage-text {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14.5px;
+  font-weight: 650;
   letter-spacing: 0.005em;
   line-height: 1.2;
-  color: var(--text-2);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -512,11 +666,11 @@ select {
 .dl-storage-bar {
   position: relative;
   width: 100%;
-  max-width: 156px;
-  height: 4px;
+  max-width: 220px;
+  height: 7px;
   margin: 0;
   border-radius: 999px;
-  background: rgba(120, 120, 128, 0.22);
+  background: rgba(120, 120, 128, 0.24);
   overflow: hidden;
 }
 
@@ -525,7 +679,7 @@ select {
   width: 0%;
   height: 100%;
   border-radius: inherit;
-  background-color: var(--text-2);
+  background-color: var(--text);
   transition: width 0.4s cubic-bezier(0.22, 0.8, 0.24, 1);
 }
 
@@ -1183,6 +1337,22 @@ select {
   padding: 6px 14px 14px 20px;
 }
 
+/* Quick Access "add shortcut" sheet: same premium surface as the downloaders. */
+.quick-add-sheet {
+  background: var(--sheet-premium);
+  border-top-color: var(--card-premium-border);
+  border-radius: 24px 24px 0 0;
+}
+
+.quick-add-sheet .sheet-head {
+  padding: 6px 14px 14px 20px;
+}
+
+/* .sheet-body.flush zeroes the shared padding, so this needs to outrank it. */
+.sheet-body.flush.quick-add-body {
+  padding: 0 20px 20px;
+}
+
 /* .sheet-body.flush zeroes the shared padding, so this needs to outrank it. */
 .sheet-body.flush.dl-sheet-body {
   /* The sheet itself already reserves the safe-area inset via padding-bottom;
@@ -1284,7 +1454,7 @@ select {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  height: 56px;
+  height: 60px;
   border-radius: 12px;
   background: var(--btn-premium);
   color: var(--btn-premium-fg);
@@ -2168,7 +2338,7 @@ body.mode-dashboard .browser-side-menu {
 
 .settings-root,
 .settings-page {
-  padding: 4px 0 calc(48px + var(--safe-bottom));
+  padding: 8px 0 calc(48px + var(--safe-bottom));
 }
 
 .settings-page[hidden] {
@@ -2176,13 +2346,13 @@ body.mode-dashboard .browser-side-menu {
 }
 
 .section-label {
-  padding: 22px 20px 9px;
+  padding: 22px 20px 10px;
   font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 .section-label:first-child {
@@ -2192,10 +2362,12 @@ body.mode-dashboard .browser-side-menu {
 .setting-group {
   display: flex;
   flex-direction: column;
-  margin: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  margin: 0 14px;
+  padding: 4px 0;
+  background: var(--sheet-premium);
+  border: 1px solid var(--card-premium-border);
+  border-radius: 24px;
+  overflow: hidden;
 }
 
 .setting-row {
@@ -2203,14 +2375,14 @@ body.mode-dashboard .browser-side-menu {
   align-items: center;
   gap: 14px;
   width: 100%;
-  min-height: 52px;
-  padding: 8px 18px;
+  min-height: 58px;
+  padding: 12px 18px;
   color: var(--text);
   text-align: left;
 }
 
 .setting-row + .setting-row {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--card-premium-border);
 }
 
 .setting-divider {
@@ -2249,9 +2421,9 @@ label.setting-row:active,
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-xs);
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
   background: var(--surface-2);
   color: var(--text-2);
 }
@@ -2309,8 +2481,8 @@ label.setting-row:active,
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
-  width: 46px;
-  height: 28px;
+  width: 52px;
+  height: 32px;
 }
 
 .switch input {
@@ -2333,10 +2505,10 @@ label.setting-row:active,
 
 .switch-thumb {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--muted);
   transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.18s ease;
@@ -2348,7 +2520,7 @@ label.setting-row:active,
 }
 
 .switch input:checked + .switch-track .switch-thumb {
-  transform: translateX(18px);
+  transform: translateX(20px);
   background: var(--accent-fg);
 }
 
@@ -2972,8 +3144,8 @@ hr.sep {
 button.switch {
   position: relative;
   flex: 0 0 auto;
-  width: 46px;
-  height: 28px;
+  width: 52px;
+  height: 32px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: var(--surface-3);
@@ -2985,10 +3157,10 @@ button.switch:active {
 }
 
 button.switch .switch-thumb {
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
   background: var(--muted);
 }
 
@@ -3003,7 +3175,7 @@ button.switch.is-on:active {
 }
 
 button.switch.is-on .switch-thumb {
-  transform: translateX(18px);
+  transform: translateX(20px);
   background: var(--accent-fg);
 }
 
@@ -3866,8 +4038,8 @@ html.page-behind .browser {
 
 .prompt-sheet {
   z-index: 90;
-  gap: 10px;
-  padding: 2px 18px calc(18px + var(--safe-bottom));
+  gap: 12px;
+  padding: 0 18px calc(16px + var(--safe-bottom));
   background: var(--sheet-premium);
   border-top-color: var(--card-premium-border);
   border-radius: 24px 24px 0 0;
@@ -3910,11 +4082,11 @@ html.page-behind .browser {
 .prompt-file {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--card-premium-border);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--field-premium);
 }
 

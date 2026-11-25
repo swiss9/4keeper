@@ -224,6 +224,17 @@ const dom = {
   browserContainer: $('browserContainer'),
   webviewSnapshot: $('webviewSnapshot'),
   startScreen: $('startScreen'),
+  newTabPage: $('newTabPage'),
+  newTabForm: $('newTabForm'),
+  newTabInput: $('newTabInput'),
+  newTabQuickAccess: $('newTabQuickAccess'),
+  dashboardQuickAccess: $('dashboardQuickAccess'),
+  quickAddSheet: $('quickAddSheet'),
+  quickAddBackdrop: $('quickAddBackdrop'),
+  quickAddForm: $('quickAddForm'),
+  quickAddName: $('quickAddName'),
+  quickAddUrl: $('quickAddUrl'),
+  quickAddClose: $('quickAddClose'),
   dashboardSection: $('dashboardSection'),
   dashboardForm: $('dashboardForm'),
   dashboardInput: $('dashboardInput'),
@@ -396,6 +407,12 @@ function hostOf(url) {
 
 function isHttpUrl(url) {
   return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+/* A tab that never loaded anything reports '' or about:blank depending on the
+ * WebView build. Both mean "no page" and get the in-app new tab page. */
+function isBlankUrl(url) {
+  return !url || url === 'about:blank';
 }
 
 function isProbablyUrl(value) {
@@ -949,7 +966,11 @@ function syncActiveTabUi() {
   }
   dom.clearUrlBtn.classList.toggle('hidden', !dom.urlInput.value);
   setSecurityIcon(currentUrl);
-  dom.startScreen.classList.toggle('is-hidden', !!currentUrl || overlays.size > 0);
+  const blank = isBlankUrl(currentUrl);
+  dom.startScreen.classList.toggle('is-hidden', !blank || overlays.size > 0);
+  if (dom.newTabPage) {
+    dom.newTabPage.classList.toggle('is-hidden', !blank || overlays.size > 0 || dashboardActive);
+  }
   updateMenuBookmark();
   updateDownloadsIndicator();
   if (overlays.has('siteInfo')) renderSiteInfo();
@@ -1110,7 +1131,10 @@ function syncNativeVisibility() {
     dom.dashboardSection.setAttribute('aria-hidden', dashboardActive ? 'false' : 'true');
   }
   if (dom.downloadFab) dom.downloadFab.classList.toggle('is-off', !dashboardActive);
-  dom.startScreen.classList.toggle('is-hidden', dashboardActive || hasPage || overlay);
+  /* The new tab page replaces the legacy start screen for a blank tab. */
+  const showNewTab = !dashboardActive && !hasPage && !overlay;
+  if (dom.newTabPage) dom.newTabPage.classList.toggle('is-hidden', !showNewTab);
+  dom.startScreen.classList.toggle('is-hidden', dashboardActive || hasPage || overlay || showNewTab);
 
   if (!overlay && !dashboardActive) {
     window.setTimeout(() => {
@@ -1952,7 +1976,8 @@ async function createTabWithUrl(url, activate) {
   }
   await mountBrowser();
   if (activate !== false) leaveDashboard();
-  const target = buildHomeUrl(url || getHomePage());
+  /* No URL means the in-app new tab page, not the search engine home. */
+  const target = url ? buildHomeUrl(url) : '';
   const shouldActivate = activate !== false;
   try {
     if (shouldActivate) await callPlugin('createTab', { url: target, activate: true });
@@ -2536,7 +2561,12 @@ function openBrowserFromDashboard() {
     syncNav();
     return;
   }
-  navigate(getHomePage());
+  if (tab && !isBlankUrl(tab.url)) {
+    navigate(getHomePage());
+    return;
+  }
+  /* A blank tab already is the browser's new tab page. */
+  syncNativeVisibility();
 }
 
 function openDownloadSheet() {
@@ -2942,6 +2972,82 @@ async function downloadDashboardMedia(index, button) {
   }
 }
 
+/* ---------------------------------------------------------- Quick access */
+
+const QUICK_ACCESS_DEFAULT = [
+  { key: 'google', label: 'Google', url: 'https://www.google.com', glyph: '<span class="qa-letter">G</span>' },
+  { key: 'youtube', label: 'YouTube', url: 'https://www.youtube.com', glyph: '<svg class="qa-glyph" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3Z" fill="currentColor"/></svg>' },
+  { key: 'instagram', label: 'Instagram', url: 'https://www.instagram.com', glyph: '<svg class="qa-glyph" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="1.1" fill="currentColor"/></svg>' }
+];
+
+function quickAccessItems() {
+  const custom = Array.isArray(settings.quickAccess) ? settings.quickAccess : [];
+  const known = QUICK_ACCESS_DEFAULT.map((item) => item.url);
+  const extra = custom
+    .filter((item) => item && typeof item.url === 'string' && item.url && known.indexOf(item.url) === -1)
+    .map((item) => {
+      const label = String(item.label || hostOf(item.url));
+      return { label: label, url: item.url, glyph: '<span class="qa-letter">' + escapeHtml(label.charAt(0).toUpperCase()) + '</span>' };
+    });
+  return QUICK_ACCESS_DEFAULT.concat(extra);
+}
+
+function renderQuickAccess() {
+  const tiles = quickAccessItems()
+    .map(
+      (item) => `
+      <button class="qa-tile" type="button" data-qa-url="${escapeHtml(item.url)}">
+        <span class="qa-icon qa-icon--${escapeHtml(item.key || 'custom')}">${item.glyph}</span>
+        <span class="qa-label">${escapeHtml(item.label)}</span>
+      </button>`
+    )
+    .join('');
+  const html =
+    tiles +
+    `
+      <button class="qa-tile" type="button" data-qa-add>
+        <span class="qa-icon qa-icon--add">${svgIcon('plus', 'qa-glyph')}</span>
+        <span class="qa-label">Add</span>
+      </button>`;
+  [dom.dashboardQuickAccess, dom.newTabQuickAccess].forEach((node) => {
+    if (node) node.innerHTML = html;
+  });
+}
+
+function openQuickAdd() {
+  closeTabSheet();
+  closeMenu();
+  closeSiteInfo();
+  hideSuggestions();
+  if (dom.quickAddName) dom.quickAddName.value = '';
+  if (dom.quickAddUrl) dom.quickAddUrl.value = '';
+  openSheet('quickAdd', dom.quickAddSheet, dom.quickAddBackdrop);
+  window.setTimeout(() => {
+    if (overlays.has('quickAdd') && dom.quickAddUrl) dom.quickAddUrl.focus();
+  }, 180);
+}
+
+function closeQuickAdd() {
+  if (overlays.has('quickAdd')) closeSheet('quickAdd', dom.quickAddSheet, dom.quickAddBackdrop);
+}
+
+function submitQuickAdd() {
+  const raw = dom.quickAddUrl ? dom.quickAddUrl.value.trim() : '';
+  if (!raw) {
+    toast('Enter a website address');
+    return;
+  }
+  const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw.replace(/^\/+/, '');
+  const label = (dom.quickAddName && dom.quickAddName.value.trim()) || hostOf(url);
+  const custom = Array.isArray(settings.quickAccess) ? settings.quickAccess.slice() : [];
+  custom.push({ label: label, url: url });
+  settings.quickAccess = custom;
+  Store.save('settings');
+  renderQuickAccess();
+  closeQuickAdd();
+  toast('Shortcut added');
+}
+
 /* ------------------------------------------------------------ App modes */
 
 /* 4Keeper has two strictly separated modes.
@@ -3137,7 +3243,7 @@ async function goHome() {
 }
 
 async function newTab(url) {
-  await createTabWithUrl(url || getHomePage(), true);
+  await createTabWithUrl(url || '', true);
   closeTabSheet();
   closeMenu();
 }
@@ -5086,6 +5192,36 @@ function attachUiListeners() {
   if (dom.clipboardPromptAccept) dom.clipboardPromptAccept.addEventListener('click', acceptClipboardPrompt);
   if (dom.clipboardPromptClose) dom.clipboardPromptClose.addEventListener('click', hideClipboardPrompt);
   if (dom.downloadFab) dom.downloadFab.addEventListener('click', openDownloadSheet);
+  if (dom.newTabForm) {
+    dom.newTabForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const value = dom.newTabInput ? dom.newTabInput.value.trim() : '';
+      if (!value) return;
+      dom.newTabInput.blur();
+      dom.newTabInput.value = '';
+      navigate(value);
+    });
+  }
+  if (dom.quickAddClose) dom.quickAddClose.addEventListener('click', closeQuickAdd);
+  if (dom.quickAddBackdrop) dom.quickAddBackdrop.addEventListener('click', closeQuickAdd);
+  if (dom.quickAddForm) {
+    dom.quickAddForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitQuickAdd();
+    });
+  }
+  /* One delegated handler serves both Quick Access grids, which are rebuilt
+   * whenever a shortcut is added. */
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('[data-qa-add]')) {
+      openQuickAdd();
+      return;
+    }
+    const tile = target.closest('[data-qa-url]');
+    if (tile) navigate(tile.getAttribute('data-qa-url'));
+  });
   if (dom.downloadSheetClose) dom.downloadSheetClose.addEventListener('click', closeDownloadSheet);
   if (dom.downloadSheetBackdrop) dom.downloadSheetBackdrop.addEventListener('click', closeDownloadSheet);
   if (dom.downloadPromptCancel) dom.downloadPromptCancel.addEventListener('click', closeDownloadPrompt);
@@ -5129,6 +5265,7 @@ function attachUiListeners() {
     if (event.key !== 'Escape') return;
     if (overlays.has('contextMenu')) closeContextMenu();
     else if (overlays.has('downloadPrompt')) closeDownloadPrompt();
+    else if (overlays.has('quickAdd')) closeQuickAdd();
   });
   if (dom.downloadPasteBtn) dom.downloadPasteBtn.addEventListener('click', pasteIntoDownloadInput);
   if (dom.dashboardMediaList) {
@@ -5735,6 +5872,10 @@ function handleBack() {
     closeDownloadSheet();
     return true;
   }
+  if (overlays.has('quickAdd')) {
+    closeQuickAdd();
+    return true;
+  }
   if (overlays.has('downloads')) {
     closeDownloads();
     return true;
@@ -5904,6 +6045,7 @@ async function boot() {
   applyTheme();
   applyDensity();
   updateMenuCounts();
+  renderQuickAccess();
 
   await mountBrowser(true);
   nativeVisibleState = false;

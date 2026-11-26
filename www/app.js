@@ -1041,6 +1041,14 @@ function setMediaSnifferActive(active) {
   }
 }
 
+/* Bridge token for app-side calls. Page scripts never see it: the sniffer's
+ * copy is baked in by the native injection, not fetched from here. */
+function getBridgeToken() {
+  return callPlugin('getBridgeToken')
+    .then((result) => (result && result.token) || '')
+    .catch(() => '');
+}
+
 /* Dashboard mode always hides the native WebView; browser mode brings it back
  * only when the active tab actually holds a page. */
 function hideNativeWebView() {

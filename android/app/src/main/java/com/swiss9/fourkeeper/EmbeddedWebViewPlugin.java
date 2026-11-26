@@ -80,6 +80,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -93,6 +94,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
+    /* Per-process secret for the page bridge. Only scripts this plugin injects
+     * know it, so a page's own JavaScript cannot drive downloads or playback
+     * through FourKeeperHost. */
+    private final String secretToken = UUID.randomUUID().toString();
+
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
 
@@ -104,18 +110,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "(d.head||d.documentElement).appendChild(m);}catch(e){}})();";
 
     /* Hides ad containers that survive network blocking (in-page slots, GPT
-     * wrappers, sponsored boxes, pop-ups). Every selector wins with three
-     * !important properties. "ad-" also appears inside "download-", so the two
-     * ad- substring rules exclude download controls: this is a downloader, and
-     * hiding the page's own download buttons would break it. */
+     * wrappers, sponsored boxes, ad pop-ups). Every selector wins with three
+     * !important properties. The selectors stay narrow on purpose: bare
+     * substrings like "ad", "banner", "overlay" and "popup" also match
+     * legitimate iframes, hero banners and site modals, so they are gone.
+     * "ad-" only counts as a class/id PREFIX, because "read-more" and
+     * "upload-area" contain it too. */
     private static final String AD_HIDE_CSS_JS =
         "(function(){try{"
             + "if(document.getElementById('4k-adhide'))return;"
-            + "var css='[id*=\"ad-\"]:not([id*=\"download\"]),"
-            + "[class*=\"ad-\"]:not([class*=\"download\"]),"
-            + "[id*=\"banner\"],[class*=\"banner\"],"
-            + "[class*=\"sponsor\"],[class*=\"popup\"],[class*=\"overlay\"],"
-            + "iframe[src*=\"ad\"],.adsbox,.ad-slot,.adsbygoogle"
+            + "var css='[id^=\"ad-\"],[id*=\" ad-\"],[class^=\"ad-\"],[class*=\" ad-\"],"
+            + "[id*=\"ad-banner\"],[class*=\"ad-banner\"],"
+            + "[class*=\"ad-overlay\"],[id*=\"ad-popup\"],[class*=\"sponsored-overlay\"],"
+            + "[class*=\"sponsor\"],.adsbox,.ad-slot,.adsbygoogle,"
+            + "iframe[src*=\"/ads/\"],iframe[src*=\"/ad/\"],iframe[src*=\"doubleclick\"],"
+            + "iframe[src*=\"googleads\"],iframe[src*=\"banners\"],iframe[src*=\"adserver\"]"
             + "{display:none!important;visibility:hidden!important;opacity:0!important;"
             + "height:0!important;min-height:0!important;margin:0!important;"
             + "padding:0!important;border:0!important;overflow:hidden!important;}';"
@@ -204,6 +213,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private static final String SNIFFER_JS =
         "(function(){try{"
             + "if(window.__4kSniffer)return;"
+            + "var tk='__4K_TOKEN__';"
             + "var d=document;"
             + "var host=d.createElement('div');"
             + "host.id='4k-sniffer';"
@@ -296,13 +306,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "play.style.cssText='border:1px solid #3f3f46;border-radius:9px;background:transparent;color:#fafafa;"
             + "font:600 11px system-ui,sans-serif;padding:6px 10px;cursor:pointer';"
             + "play.onclick=function(e){e.stopPropagation();closeSheet();"
-            + "try{window.FourKeeperHost.playMedia(item.url,item.kind||'video');}catch(err){}};"
+            + "try{window.FourKeeperHost.playMedia(item.url,item.kind||'video',tk);}catch(err){}};"
             + "var dl=d.createElement('button');"
             + "dl.type='button';dl.textContent='Download';"
             + "dl.style.cssText='border:0;border-radius:9px;background:#fafafa;color:#09090b;"
             + "font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer';"
             + "dl.onclick=function(e){e.stopPropagation();closeSheet();"
-            + "try{window.FourKeeperHost.downloadMedia(item.url,item.kind||'video');}catch(err){}};"
+            + "try{window.FourKeeperHost.downloadMedia(item.url,item.kind||'video',tk);}catch(err){}};"
             + "acts.appendChild(play);acts.appendChild(dl);"
             + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
             + "return r;}"
@@ -320,6 +330,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "fab.animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}],"
             + "{duration:2400,iterations:Infinity,easing:'ease-in-out'});}}catch(e){}"
             + "}catch(e){}})();";
+
+    /* Token is filled in at injection time, so the page only ever sees a
+     * closure holding it, never the value itself. */
+    private String snifferJs() {
+        return SNIFFER_JS.replace("__4K_TOKEN__", secretToken);
+    }
 
     private static final String[] TRACKER_HOSTS = new String[] {
         "doubleclick.net",
@@ -1000,7 +1016,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
          * handed to the UI thread; nothing here trusts the page beyond the URL
          * it was given (the download path validates the scheme again). */
         @JavascriptInterface
-        public void downloadMedia(String url, String kind) {
+        public void downloadMedia(String url, String kind, String token) {
+            if (!secretToken.equals(token)) return;
             if (url == null || url.isEmpty()) return;
             Activity activity = getActivity();
             if (activity == null) return;
@@ -1010,7 +1027,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
 
         @JavascriptInterface
-        public void playMedia(String url, String kind) {
+        public void playMedia(String url, String kind, String token) {
+            if (!secretToken.equals(token)) return;
             if (url == null || url.isEmpty()) return;
             Activity activity = getActivity();
             if (activity == null) return;
@@ -1336,7 +1354,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 view.evaluateJavascript(CONTEXT_MENU_JS, null);
             }
             if (snifferEnabled) {
-                view.evaluateJavascript(SNIFFER_JS, null);
+                view.evaluateJavascript(snifferJs(), null);
                 view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
                 pushSniffer(tabId);
             }
@@ -1846,6 +1864,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("items", items);
         result.put("activeTabId", activeTabId);
+        call.resolve(result);
+    }
+
+    /* App-side copy of the bridge token. Pages cannot reach plugin methods, so
+     * this never hands the secret to page JavaScript. */
+    @PluginMethod
+    public void getBridgeToken(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("token", secretToken);
         call.resolve(result);
     }
 

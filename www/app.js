@@ -178,6 +178,7 @@ let dashboardBusy = false;
 let dashboardRefreshToken = 0;
 let dashboardSort = 'date';
 let dashboardSortMenuOpen = false;
+let tabSwipeBlockClick = false;
 let dashboardSpeeds = {};
 let clipboardPromptUrl = '';
 let clipboardLastPrompt = '';
@@ -2477,6 +2478,17 @@ function updateDashboardStorage() {
   if (dom.dashboardStorageFill) dom.dashboardStorageFill.style.width = percent.toFixed(1) + '%';
 }
 
+/* Filter tabs in the order the bar shows them, left to right. */
+const DASHBOARD_FILTER_ORDER = ['shortcuts', 'all', 'downloading', 'finished', 'error'];
+
+function cycleDashboardFilter(step) {
+  const index = DASHBOARD_FILTER_ORDER.indexOf(dashboardStatusFilter);
+  const next = (index < 0 ? 0 : index) + step;
+  if (next < 0 || next >= DASHBOARD_FILTER_ORDER.length) return;
+  dashboardStatusFilter = DASHBOARD_FILTER_ORDER[next];
+  renderDashboardQueue();
+}
+
 function syncDashboardFilters() {
   if (dom.dashboardFilters) {
     dom.dashboardFilters.querySelectorAll('[data-dl-status]').forEach((button) => {
@@ -3367,6 +3379,20 @@ async function switchTab(id) {
   refreshTabMedia();
   setLoading(false);
   saveSession();
+}
+
+/* Bottom-nav swipe: step through the open WebView tabs, wrapping at the ends. */
+async function cycleWebTab(step) {
+  if (!tabs.length) return;
+  const index = tabs.findIndex((tab) => tab.id === activeTabId);
+  const target = tabs[((index < 0 ? 0 : index) + step + tabs.length) % tabs.length];
+  if (!target || target.id === activeTabId) {
+    toast('Tab ' + (index + 1) + ' of ' + tabs.length);
+    return;
+  }
+  await switchTab(target.id);
+  const now = tabs.findIndex((tab) => tab.id === activeTabId);
+  toast('Tab ' + (now + 1) + ' of ' + tabs.length);
 }
 
 async function closeTab(id) {
@@ -5238,6 +5264,39 @@ function attachUiListeners() {
       renderDashboardQueue();
     });
   }
+  if (dom.dashboardSection) {
+    /* Swipe the dashboard body sideways to step through the status tabs. Only a
+     * mostly horizontal drag counts, so vertical scrolling is untouched. */
+    let swipeX = null;
+    let swipeY = 0;
+    dom.dashboardSection.addEventListener(
+      'touchstart',
+      (event) => {
+        if (event.touches.length !== 1) {
+          swipeX = null;
+          return;
+        }
+        swipeX = event.touches[0].clientX;
+        swipeY = event.touches[0].clientY;
+      },
+      { passive: true }
+    );
+    dom.dashboardSection.addEventListener(
+      'touchend',
+      (event) => {
+        if (swipeX === null) return;
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - swipeX;
+        const deltaY = touch.clientY - swipeY;
+        swipeX = null;
+        if (Math.abs(deltaX) < 50 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+        /* The filter bar and the shortcut grid scroll sideways themselves. */
+        if (event.target.closest('.dl-filters, .quick-access, .category-chips')) return;
+        cycleDashboardFilter(deltaX > 0 ? -1 : 1);
+      },
+      { passive: true }
+    );
+  }
   if (dom.dashboardCategories) {
     dom.dashboardCategories.addEventListener('click', (event) => {
       const button = event.target.closest('[data-dl-category]');
@@ -5433,7 +5492,48 @@ function attachUiListeners() {
   if (dom.sideDrawerClose) dom.sideDrawerClose.addEventListener('click', closeSideDrawer);
   if (dom.sideDrawerBackdrop) dom.sideDrawerBackdrop.addEventListener('click', closeSideDrawer);
   if (dom.tabsBtn) {
+    let tabSwipeX = null;
+    let tabSwipeY = 0;
+    dom.tabsBtn.addEventListener(
+      'touchstart',
+      (event) => {
+        tabSwipeBlockClick = false;
+        if (event.touches.length !== 1) {
+          tabSwipeX = null;
+          return;
+        }
+        tabSwipeX = event.touches[0].clientX;
+        tabSwipeY = event.touches[0].clientY;
+      },
+      { passive: true }
+    );
+    dom.tabsBtn.addEventListener(
+      'touchmove',
+      (event) => {
+        if (tabSwipeX === null) return;
+        if (Math.abs(event.touches[0].clientX - tabSwipeX) > 10) tabSwipeBlockClick = true;
+      },
+      { passive: true }
+    );
+    dom.tabsBtn.addEventListener(
+      'touchend',
+      (event) => {
+        if (tabSwipeX === null) return;
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - tabSwipeX;
+        const deltaY = touch.clientY - tabSwipeY;
+        tabSwipeX = null;
+        if (Math.abs(deltaX) < 30 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+        cycleWebTab(deltaX > 0 ? -1 : 1);
+      },
+      { passive: true }
+    );
     dom.tabsBtn.addEventListener('click', () => {
+      /* A swipe must not also open the Tab Manager. */
+      if (tabSwipeBlockClick) {
+        tabSwipeBlockClick = false;
+        return;
+      }
       if (overlays.has('tabs')) closeTabSheet();
       else openTabSheet();
     });
@@ -6174,6 +6274,8 @@ async function boot() {
   nativeVisibleState = false;
   setNativeVisible(false);
   await pushNativeSettings(false);
+  /* Android 13+ asks once; the answer only gates notifications. */
+  callPlugin('requestNotificationPermission').catch(() => {});
   loadAppInfo();
 
   try {

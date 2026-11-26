@@ -425,9 +425,14 @@ select {
 
 .quick-access {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 16px;
   padding: 14px 0 6px;
+  /* A long shortcut list used to push the search field off the screen, so
+   * the grid is capped and scrolls itself. */
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .qa-tile {
@@ -628,6 +633,17 @@ select {
   width: auto;
   height: 78px;
   object-fit: contain;
+}
+
+/* logo.png has a dark tile baked into its pixels, which reads as a black
+ * blob on a white page. The app theme decides, not the OS, so light mode
+ * inverts it. */
+.logo-img {
+  background: transparent;
+}
+
+[data-theme="light"] .logo-img {
+  filter: invert(1);
 }
 
 .new-tab-search {
@@ -4151,11 +4167,20 @@ html.page-behind .browser {
 .prompt-sheet {
   z-index: 90;
   gap: 12px;
+  /* The sheet used to pop in opaque while the backdrop faded over 220ms. */
+  opacity: 0;
+  transition: transform 0.26s cubic-bezier(0.22, 0.8, 0.24, 1), opacity 0.2s ease-in-out,
+    visibility 0s linear 0.26s;
   padding: 0 18px calc(16px + var(--safe-bottom));
   background: var(--sheet-premium);
   border-top-color: var(--card-premium-border);
   border-radius: 24px 24px 0 0;
   box-shadow: 0 -24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.prompt-sheet.open {
+  opacity: 1;
+  transition: transform 0.26s cubic-bezier(0.22, 0.8, 0.24, 1), opacity 0.2s ease-in-out, visibility 0s;
 }
 
 .prompt-head {

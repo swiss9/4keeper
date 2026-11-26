@@ -1,5 +1,6 @@
 package com.swiss9.fourkeeper;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.DownloadManager;
@@ -2597,8 +2598,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
                     file
                 );
             }
+            /* Downloads often arrive as application/octet-stream, which no
+             * installer accepts; fall back to the extension's real type so an
+             * apk opens the package installer. */
+            if (mime == null || mime.isEmpty() || "application/octet-stream".equalsIgnoreCase(mime)) {
+                mime = mimeForName(uri.getLastPathSegment());
+            }
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(uri, mime == null || mime.isEmpty() ? "*/*" : mime);
+            intent.setDataAndType(uri, mime);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             getContext().startActivity(intent);
             return true;
@@ -2798,13 +2805,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
      * Android's DownloadManager, so the "Connections per file" setting (1, 4,
      * 8 or 16 ranged connections) is actually used.
      */
-    private void startNativeDownload(String url, String filename, String mime, String userAgent, int sourceTabId) {
+    private boolean startNativeDownload(String url, String filename, String mime, String userAgent, int sourceTabId) {
         File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
         if (!dir.exists() && !dir.mkdirs()) {
             toast("Could not create the download folder.");
-            return;
+            return false;
         }
+        /* A redownload of a file that is still on disk writes "name (1).ext"
+         * instead of truncating the copy the old record points at. */
         File target = uniqueDownloadFile(dir, filename);
         String name = target.getName();
         String resolvedMime = mime == null ? "" : mime;
@@ -2828,7 +2837,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             addDownloadRecord(record);
         } catch (Exception error) {
             toast("Could not start the download.");
-            return;
+            return false;
         }
 
         JSObject started = new JSObject();
@@ -2850,6 +2859,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         downloader.setSpeedLimitKb(speedLimitKb);
         downloader.bindState(id, downloadStateFile);
         scheduleNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
+        return true;
     }
 
     /** Keeps the download record and the list in step with the engine. */
@@ -3430,6 +3440,19 @@ public class EmbeddedWebViewPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /** Android 13+ needs a runtime grant before the app may show notifications. */
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            Activity activity = getActivity();
+            if (activity != null
+                && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                activity.requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 4110);
+            }
+        }
+        call.resolve();
+    }
+
     /** Starts the record's URL again as a fresh download. */
     @PluginMethod
     public void redownload(PluginCall call) {
@@ -3444,10 +3467,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
             call.reject("This download has no link to repeat.");
             return;
         }
-        final String target = url;
-        final String filename = record.optString("filename", "");
-        final String mime = record.optString("mime", "");
-        getActivity().runOnUiThread(() -> startNativeDownload(target, filename, mime, "", activeTabId));
+        String filename = record.optString("filename", "");
+        String mime = record.optString("mime", "");
+        if (!startNativeDownload(url, filename, mime, "", activeTabId)) {
+            call.reject("Could not restart this download.");
+            return;
+        }
         call.resolve();
     }
 

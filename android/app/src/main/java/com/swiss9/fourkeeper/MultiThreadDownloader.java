@@ -85,6 +85,11 @@ public class MultiThreadDownloader {
     private long savedStreamBytes = 0L;
     /** A shutdown keeps the partial file so the next launch can continue it. */
     private volatile boolean preservePartial = false;
+    /** Bandwidth cap for the whole transfer, in bytes per second. 0 = unlimited. */
+    private volatile long speedLimit = 0L;
+    /** Virtual finish time shared by every worker, so the cap covers the file. */
+    private final Object speedLock = new Object();
+    private long speedDueAt = 0L;
 
     public MultiThreadDownloader(
         String url,
@@ -112,6 +117,36 @@ public class MultiThreadDownloader {
 
     public int getConnections() {
         return connections;
+    }
+
+    /** Caps the transfer at {@code kbPerSecond} KB/s; 0 or less removes the cap. */
+    public void setSpeedLimitKb(int kbPerSecond) {
+        speedLimit = kbPerSecond <= 0 ? 0L : kbPerSecond * 1024L;
+        synchronized (speedLock) {
+            speedDueAt = 0L;
+        }
+    }
+
+    /* Gives every written byte a due time of bytes/limit and makes the worker
+     * wait for it, so the transfer can never run ahead of the cap. All chunks
+     * share one schedule, so the limit covers the file instead of being
+     * multiplied by the connection count, and it holds for any buffer size. */
+    private void throttle(long bytes) {
+        long limit = speedLimit;
+        if (limit <= 0L || bytes <= 0L) return;
+        long wait;
+        synchronized (speedLock) {
+            long now = System.currentTimeMillis();
+            if (speedDueAt < now) speedDueAt = now;
+            speedDueAt += bytes * 1000L / limit;
+            wait = speedDueAt - now;
+        }
+        /* Short slices keep pause and cancel responsive under a low cap. */
+        while (wait > 0L && !cancelled && !paused && !Thread.currentThread().isInterrupted()) {
+            long slice = Math.min(wait, 250L);
+            sleepQuietly(slice);
+            wait -= slice;
+        }
     }
 
     public long getDownloadedBytes() {
@@ -431,6 +466,7 @@ public class MultiThreadDownloader {
                         written += read;
                         chunkOffsets.put(index, position);
                         report(downloaded.addAndGet(read), total);
+                        throttle(read);
                     }
                     if (position != end + 1) {
                         throw new IOException(
@@ -503,6 +539,7 @@ public class MultiThreadDownloader {
                 streamBytes = written;
                 downloaded.set(written);
                 report(written, total);
+                throttle(read);
             }
             output.flush();
             totalBytes = written;

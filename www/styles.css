@@ -664,6 +664,16 @@ select {
   font-size: 15px;
 }
 
+/* The Android focus ring drew a white box around the field: the pill wrapper
+ * already shows focus, so the input itself never paints one. */
+.new-tab-input:focus,
+.new-tab-input:focus-visible {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent;
+}
+
 .new-tab-input::placeholder {
   color: var(--muted);
 }

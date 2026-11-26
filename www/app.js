@@ -77,10 +77,13 @@ const DEFAULT_SETTINGS = {
   suggestHistory: true,
   showFullUrl: false,
   webDarkMode: false,
-  trackingProtection: false,
+  trackingProtection: true,
   /* Privacy shields are opt-out: every fresh install starts protected. */
   adBlock: true,
   fingerprintBlock: true,
+  doNotTrack: true,
+  /* Stored only for now: the WebView has no per-app DNS resolver. */
+  dnsOverHttps: false,
   safeBrowsing: true,
   cookies: 'all',
   javaScript: true,
@@ -165,7 +168,7 @@ let storageReady = false;
 let isDashboardMode = true;
 let booting = true;
 let dashboardActive = true;
-let dashboardStatusFilter = 'all';
+let dashboardStatusFilter = 'shortcuts';
 let shortcutsEditing = false;
 let editingShortcutIndex = -1;
 let dashboardCategory = 'all';
@@ -1562,6 +1565,8 @@ function pushNativeSettings(reload) {
     trackingProtection: !!settings.trackingProtection,
     isAdBlockEnabled: !!settings.adBlock,
     isFingerprintBlockEnabled: !!settings.fingerprintBlock,
+    doNotTrack: !!settings.doNotTrack,
+    speedLimit: Number(settings.speedLimit) || 0,
     connectionsPerFile: Number(settings.connectionsPerFile) || 1,
     zoomControls: !!settings.zoomControls,
     pinchZoom: !!settings.pinchZoom,
@@ -1591,6 +1596,8 @@ const NATIVE_SETTING_KEYS = [
   'trackingProtection',
   'adBlock',
   'fingerprintBlock',
+  'doNotTrack',
+  'speedLimit',
   'connectionsPerFile',
   'zoomControls',
   'pinchZoom',
@@ -2372,7 +2379,7 @@ function dashboardRowMarkup(item) {
   const paused = isPaused(item);
   const id = escapeHtml(item.id);
   return `
-    <div class="dl-row" data-download-id="${id}" data-dl-group="${group}" data-dl-paused="${paused ? '1' : '0'}">
+    <div class="dl-row" id="dl-row-${id}" data-download-id="${id}" data-dl-group="${group}" data-dl-paused="${paused ? '1' : '0'}">
       <span class="dl-row-icon" aria-hidden="true">${svgIcon(DASHBOARD_CATEGORY_ICONS[category] || 'file', 'icon icon-sm')}</span>
       <div class="dl-row-main">
         <div class="dl-row-name" title="${escapeHtml(item.filename || 'Download')}">${escapeHtml(item.filename || 'Download')}</div>
@@ -2532,7 +2539,7 @@ function updateDashboardProgress(data) {
   const id = Number(data && data.id);
   const item = downloadsCache.find((entry) => Number(entry.id) === id);
   if (!item) return;
-  const row = dom.dashboardQueue.querySelector('[data-download-id="' + id + '"]');
+  const row = document.getElementById('dl-row-' + id);
   if (!row) return;
   const group = downloadStatusGroup(item);
   /* A pause or resume swaps the row's action button, so redraw the row instead
@@ -2547,14 +2554,19 @@ function updateDashboardProgress(data) {
     meta.textContent = dashboardMetaText(item, group);
   }
   const bar = row.querySelector('[data-dl-progress]');
-  if (bar) {
-    const percent = dashboardPercent(item);
-    bar.setAttribute('aria-valuenow', String(percent));
-    const fill = bar.firstElementChild;
-    if (fill) fill.style.width = percent + '%';
-    const pct = row.querySelector('[data-dl-pct]');
-    if (pct) pct.textContent = percent + '%';
+  if (!bar) {
+    /* The first progress event can land after the row was drawn without a bar
+     * (the size was still unknown). Redraw this row only, so the other running
+     * downloads keep their bars and scroll position. */
+    if (Number(item.totalBytes) > 0) row.outerHTML = dashboardRowMarkup(item);
+    return;
   }
+  const percent = dashboardPercent(item);
+  bar.setAttribute('aria-valuenow', String(percent));
+  const fill = bar.firstElementChild;
+  if (fill) fill.style.width = percent + '%';
+  const pct = row.querySelector('[data-dl-pct]');
+  if (pct) pct.textContent = percent + '%';
 }
 
 function setDashboardSearch(open) {
@@ -4315,7 +4327,17 @@ function renderDownloads() {
 async function fetchDownloads() {
   try {
     const result = await callPlugin('getDownloads');
-    downloadsCache = Array.isArray(result && result.items) ? result.items : [];
+    const incoming = Array.isArray(result && result.items) ? result.items : [];
+    /* A poll can land between two progress events. Keeping the higher byte
+     * count means a running row never falls back to an empty progress bar. */
+    downloadsCache = incoming.map((item) => {
+      const live = downloadsCache.find((entry) => Number(entry.id) === Number(item.id));
+      if (!live || downloadStatusGroup(item) !== 'downloading') return item;
+      return Object.assign({}, item, {
+        bytes: Math.max(Number(item.bytes) || 0, Number(live.bytes) || 0),
+        totalBytes: Number(item.totalBytes) || Number(live.totalBytes) || 0
+      });
+    });
     downloadsUsage = {
       usedBytes: Number(result && result.usedBytes) || 0,
       totalBytes: Number(result && result.totalBytes) || 0
@@ -4766,6 +4788,8 @@ function settingsPagePrivacy() {
       ${settingRowToggle('adBlock', 'Ad & Tracker Blocking', 'Block ad networks and hide ad containers')}
       ${settingRowToggle('fingerprintBlock', 'Fingerprint Protection', 'Spoof device details and canvas output')}
       ${settingRowToggle('trackingProtection', 'Tracking protection', 'Block known tracking hosts')}
+      ${settingRowToggle('doNotTrack', 'Do Not Track', 'Ask sites not to track you (DNT header)')}
+      ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups (not active yet)')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
     `) +
     settingSection('Cookies', `

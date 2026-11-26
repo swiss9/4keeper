@@ -98,7 +98,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
 
     /* Hides ad containers that survive network blocking (in-page slots, GPT
-     * wrappers, sponsored boxes) without touching legitimate layout. */
+     * wrappers, sponsored boxes) without touching legitimate layout.
+     * Class prefixes are anchored to a word start ("ad-" but not "load-more"),
+     * and iframe srcs need a path separator, so "uploads" never matches. */
     private static final String AD_HIDE_CSS_JS =
         "(function(){try{"
             + "if(document.getElementById('4k-adhide'))return;"
@@ -106,8 +108,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "[id*=\"outbrain\"],[class*=\"ad-banner\"],[class*=\"ad-container\"],"
             + "[class*=\"ad-slot\"],[class*=\"ad-wrapper\"],[class*=\"adsbygoogle\"],"
             + "[class*=\"sponsored-ad\"],[data-ad-slot],[data-ad-client],"
+            + "[class^=\"ad-\"],[class*=\" ad-\"],[id^=\"ad-\"],[id*=\" ad-\"],"
+            + "[class*=\"advert\"],[id*=\"advert\"],"
+            + "[class*=\"sponsored\"],[class*=\"promoted\"],"
             + "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
-            + "iframe[src*=\"amazon-adsystem.com\"]"
+            + "iframe[src*=\"amazon-adsystem.com\"],"
+            + "iframe[src*=\"/ads\"],iframe[src*=\"ads.\"],iframe[src*=\"ads/\"],"
+            + "iframe[src*=\"adservice\"],iframe[src*=\"pagead\"]"
             + "{display:none!important;height:0!important;min-height:0!important;margin:0!important;"
             + "padding:0!important;border:0!important;overflow:hidden!important;}';"
             + "var s=document.createElement('style');s.id='4k-adhide';s.textContent=css;"
@@ -472,7 +479,34 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "mobclix.com",
         "tapreason.com",
         "vserv.com",
-        "zimedia.co"
+        "zimedia.co",
+        "doubleclick.net",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "analytics.google.com",
+        "connect.facebook.net",
+        "pixel.facebook.com",
+        "bat.bing.com",
+        "clarity.ms",
+        "hotjar.com",
+        "segment.io",
+        "amplitude.com",
+        "mixpanel.com",
+        "fullstory.com",
+        "heapanalytics.com",
+        "appsflyer.com",
+        "adjust.com",
+        "branch.io",
+        "ads.linkedin.com",
+        "px.ads.linkedin.com",
+        "ads.tiktok.com",
+        "analytics.tiktok.com",
+        "ads.pinterest.com",
+        "ads.reddit.com",
+        "ads.yahoo.com",
+        "ads.twitter.com"
     ));
 
     /* URL-shape rules for ads that live on a first-party domain. They are
@@ -517,7 +551,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "amazon-adsystem",
         "/gampad/",
         "/gpt/",
-        "[/.]gpt\\.js"
+        "[/.]gpt\\.js",
+        "facebook\\.com/tr",
+        "/tr\\?ev="
     };
 
     private static final Pattern AD_URL_PATTERN = Pattern.compile(
@@ -666,8 +702,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean safeBrowsingEnabled = true;
     /* Read from the WebView's IO thread inside shouldInterceptRequest, so the
      * flags must be volatile or a settings change could stay invisible there. */
-    private volatile boolean trackingProtectionEnabled = false;
+    private volatile boolean trackingProtectionEnabled = true;
     private volatile boolean adBlockEnabled = true;
+    private volatile boolean doNotTrack = true;
     private boolean fingerprintBlockEnabled = true;
     private boolean desktopMode = false;
     private boolean pinchZoomEnabled = true;
@@ -677,6 +714,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean autoOpenDownload = false;
     private boolean parallelDownloads = true;
     private int connectionsPerFile = 4;
+    /** Download bandwidth cap in KB/s; 0 means unlimited. */
+    private volatile int speedLimitKb = 0;
     private boolean askDownloadLocation = false;
     private String downloadLocation = "";
     private int textZoom = 100;
@@ -736,8 +775,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         javaScriptEnabled = prefs.getBoolean("javaScriptEnabled", true);
         popupsEnabled = prefs.getBoolean("popupsEnabled", true);
         safeBrowsingEnabled = prefs.getBoolean("safeBrowsingEnabled", true);
-        trackingProtectionEnabled = prefs.getBoolean("trackingProtectionEnabled", false);
+        trackingProtectionEnabled = prefs.getBoolean("trackingProtectionEnabled", true);
         adBlockEnabled = prefs.getBoolean("adBlockEnabled", true);
+        doNotTrack = prefs.getBoolean("doNotTrack", true);
         fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", true);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
@@ -803,6 +843,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("safeBrowsingEnabled", safeBrowsingEnabled)
             .putBoolean("trackingProtectionEnabled", trackingProtectionEnabled)
             .putBoolean("adBlockEnabled", adBlockEnabled)
+            .putBoolean("doNotTrack", doNotTrack)
+            .putInt("speedLimit", speedLimitKb)
             .putBoolean("fingerprintBlockEnabled", fingerprintBlockEnabled)
             .putBoolean("desktopMode", desktopMode)
             .putBoolean("pinchZoomEnabled", pinchZoomEnabled)
@@ -906,6 +948,34 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
         } catch (Exception ignored) {
         }
+        /* Older WebViews, and any view whose feature check failed, honour the
+         * legacy flag instead. Without it the app's own dark theme can darken
+         * pages the user never asked to darken. */
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                view.getSettings().setForceDark(
+                    webDarkMode ? WebSettings.FORCE_DARK_ON : WebSettings.FORCE_DARK_OFF
+                );
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /* Loads a page with the privacy headers the user enabled. DNT is only sent
+     * on loads this method performs: link taps inside a page navigate on the
+     * WebView's own stack and carry no custom headers.
+     * shortcut: per-navigation DNT would need an intercepting proxy, add one if
+     * sites start ignoring the first request's header. */
+    private void loadPage(WebView view, String url) {
+        if (view == null || url == null || url.isEmpty()) return;
+        if (doNotTrack) {
+            Map<String, String> headers = new HashMap<>();
+            headers.put("DNT", "1");
+            headers.put("Sec-GPC", "1");
+            view.loadUrl(url, headers);
+            return;
+        }
+        view.loadUrl(url);
     }
 
     private void applyActiveVisibility() {
@@ -1025,7 +1095,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         if (url != null && !url.trim().isEmpty()) {
             tab.url = url;
-            view.loadUrl(url);
+            loadPage(view, url);
         }
         return tab;
     }
@@ -1118,6 +1188,23 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (lower.equals(tracker) || lower.endsWith("." + tracker)) return true;
         }
         return false;
+    }
+
+    /* Tracker endpoints served from a first-party host, where only the path
+     * gives them away. Every rule needs a query marker or an exact pixel name,
+     * so a language path such as /tr/ or a normal page never trips it. */
+    private static final Pattern TRACKER_PATH_PATTERN = Pattern.compile(
+        "(?:/tr\\?(?:[^#]*&)?ev=|/g/collect|/collect\\?v=|/__utm\\.gif|/pixel\\.gif|/beacon\\.gif)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static boolean isTrackerPath(String url) {
+        if (url == null || url.isEmpty()) return false;
+        try {
+            return TRACKER_PATH_PATTERN.matcher(url).find();
+        } catch (Exception error) {
+            return false;
+        }
     }
 
     /* Walks the host's parent domains (ads.example.com -> example.com -> com)
@@ -1335,7 +1422,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
             if (!mainFrame) {
                 if (ads && isBlockedRequest(host, url)) return blockedResponse();
-                if (trackers && isTracker(host)) return blockedResponse();
+                /* Host and path are both checked: a tracker on a first-party
+                 * host only shows up in the path. */
+                if (trackers && (isTracker(host) || isTrackerPath(url))) return blockedResponse();
                 detectMediaRequest(tabId, request);
             }
             return null;
@@ -1748,7 +1837,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 activateTab(tab);
             } else {
                 tab.url = url;
-                tab.view.loadUrl(url);
+                loadPage(tab.view, url);
             }
             JSObject result = tabState(tab);
             result.put("activeTabId", activeTabId);
@@ -1972,6 +2061,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("trackingProtection")) trackingProtectionEnabled = data.optBoolean("trackingProtection", false);
         if (data.has("isAdBlockEnabled")) adBlockEnabled = data.optBoolean("isAdBlockEnabled", true);
         if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", true);
+        if (data.has("doNotTrack")) doNotTrack = data.optBoolean("doNotTrack", true);
+        if (data.has("speedLimit")) {
+            speedLimitKb = Math.max(0, data.optInt("speedLimit", 0));
+            /* A cap changed while files are running applies to them too. */
+            for (MultiThreadDownloader running : activeDownloaders.values()) {
+                running.setSpeedLimitKb(speedLimitKb);
+            }
+        }
         if (data.has("zoomControls")) zoomControlsVisible = data.optBoolean("zoomControls", false);
         if (data.has("pinchZoom")) pinchZoomEnabled = data.optBoolean("pinchZoom", true);
         if (data.has("downloadNotifications")) downloadNotifications = data.optBoolean("downloadNotifications", true);
@@ -2750,6 +2847,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             cookie,
             progressListener(id)
         );
+        downloader.setSpeedLimitKb(speedLimitKb);
         downloader.bindState(id, downloadStateFile);
         scheduleNativeDownload(id, target, name, resolvedMime, url, sourceTabId, downloader);
     }
@@ -3264,6 +3362,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             cookie,
             progressListener(id)
         );
+        downloader.setSpeedLimitKb(speedLimitKb);
         downloader.bindState(id, downloadStateFile);
         pausedDownloads.remove(id);
         scheduleNativeDownload(id, target, name, mime, url, record.optInt("tabId", -1), downloader);

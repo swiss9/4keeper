@@ -70,6 +70,8 @@ public class MultiThreadDownloader {
     private volatile long totalBytes = -1L;
     private volatile long lastProgressAt = 0L;
     private volatile boolean cancelled = false;
+    /** Pool of the running chunk transfer, so cancel() can stop it at once. */
+    private volatile ExecutorService activePool;
     private volatile boolean paused = false;
     /** Bytes already written per chunk, so resume restarts at the right offset. */
     private final Map<Integer, Long> chunkOffsets = new ConcurrentHashMap<>();
@@ -163,6 +165,12 @@ public class MultiThreadDownloader {
 
     public void cancel() {
         cancelled = true;
+        ExecutorService pool = activePool;
+        if (pool != null) pool.shutdownNow();
+        /* Unlink right away: a worker still holding the descriptor writes to an
+         * unlinked inode, so even a stuck thread cannot leave a ghost file. */
+        File file = destination;
+        if (file != null && file.exists()) file.delete();
     }
 
     public boolean isPaused() {
@@ -360,6 +368,7 @@ public class MultiThreadDownloader {
         }
 
         ExecutorService pool = Executors.newFixedThreadPool(parts);
+        activePool = pool;
         List<Future<Void>> futures = new ArrayList<>(parts);
         try {
             for (int index = 0; index < parts; index++) {
@@ -384,6 +393,8 @@ public class MultiThreadDownloader {
             Thread.currentThread().interrupt();
             pool.shutdownNow();
             throw new IOException("Interrupted while downloading");
+        } finally {
+            activePool = null;
         }
 
         IOException failure = null;

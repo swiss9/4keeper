@@ -72,10 +72,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -97,6 +95,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private static final String TAP_STYLE_JS =
         "(function(){try{document.documentElement.style.touchAction='manipulation';}catch(e){}})();";
+
+    /* Tells the WebView the page owns its palette, so no user-agent darkening
+     * repaints a light site. Skipped when Web dark mode is on. */
+    private static final String LIGHT_COLOR_SCHEME_JS =
+        "(function(){try{var d=document;if(d.querySelector('meta[name=\"color-scheme\"]'))return;"
+            + "var m=d.createElement('meta');m.name='color-scheme';m.content='only light';"
+            + "(d.head||d.documentElement).appendChild(m);}catch(e){}})();";
 
     /* Hides ad containers that survive network blocking (in-page slots, GPT
      * wrappers, sponsored boxes) without touching legitimate layout.
@@ -229,286 +234,6 @@ public class EmbeddedWebViewPlugin extends Plugin {
         "static.ads-twitter.com",
         "analytics.google.com"
     };
-
-    /* Network-level ad blocklist, evaluated for every sub-resource the WebView
-     * requests. Entries are domain suffixes: any subdomain of a listed domain
-     * is blocked too. The list is walked from the full host upwards and stops at
-     * the first match, so the cost per request stays constant no matter how many
-     * entries the list carries. */
-    private static final HashSet<String> AD_DOMAINS = new HashSet<>(Arrays.asList(
-        "2o7.net",
-        "33across.com",
-        "3lift.com",
-        "ad-delivery.net",
-        "ad-score.com",
-        "ad-stir.com",
-        "adap.tv",
-        "adblade.com",
-        "adcash.com",
-        "adcell.de",
-        "adcolony.com",
-        "addthis.com",
-        "adentifi.com",
-        "adforest.net",
-        "adform.net",
-        "adhigh.net",
-        "adition.com",
-        "adition.net",
-        "admixer.net",
-        "adnxs.com",
-        "adotmob.com",
-        "adroll.com",
-        "ads-twitter.com",
-        "adsafeprotected.com",
-        "adscale.de",
-        "adsniper.ru",
-        "adsrvr.org",
-        "adsterra.com",
-        "adswizz.com",
-        "adtelligent.com",
-        "adtriba.io",
-        "adtrue.com",
-        "adunity.com",
-        "adverline.com",
-        "advertise.com",
-        "advertising.com",
-        "advertnative.com",
-        "advertserve.com",
-        "adyoulike.com",
-        "aerserv.com",
-        "agkn.com",
-        "aidata.io",
-        "aimatch.com",
-        "algorix.co",
-        "amazon-adsystem.com",
-        "amobee.com",
-        "apester.com",
-        "appier.net",
-        "applovin.com",
-        "appnexus.com",
-        "apptornado.com",
-        "apsalar.com",
-        "avazutracking.net",
-        "bidr.io",
-        "bidswitch.net",
-        "bidtheatre.com",
-        "bidvertiser.com",
-        "blinkx.com",
-        "bluekai.com",
-        "bluelithium.com",
-        "brand-display.com",
-        "brealtime.com",
-        "bridgewell.com",
-        "brightroll.com",
-        "buysellads.com",
-        "buzzoola.com",
-        "casalemedia.com",
-        "cedexis.com",
-        "chartbeat.com",
-        "chartboost.com",
-        "clarium.io",
-        "clickagy.com",
-        "clickcertain.com",
-        "clicktale.net",
-        "coadvertise.com",
-        "comscore.com",
-        "connatix.com",
-        "contentabc.com",
-        "contextweb.com",
-        "convertro.com",
-        "criteo.com",
-        "criteo.net",
-        "crwdcntrl.net",
-        "ctnsnet.com",
-        "cxense.com",
-        "dable.io",
-        "de17a.com",
-        "deepintent.com",
-        "demdex.net",
-        "districtm.io",
-        "dotomi.com",
-        "doubleclick.net",
-        "doubleverify.com",
-        "emxdgt.com",
-        "engagebdr.com",
-        "eqads.com",
-        "everesttech.net",
-        "exelator.com",
-        "exoclick.com",
-        "eyeota.net",
-        "eyereturn.com",
-        "fastclick.net",
-        "flashtalking.com",
-        "freewheel.tv",
-        "fwmrm.net",
-        "fyber.com",
-        "geniee.co.jp",
-        "getclicky.com",
-        "gmossp-sp.jp",
-        "google-analytics.com",
-        "googleadservices.com",
-        "googlesyndication.com",
-        "googletagmanager.com",
-        "googletagservices.com",
-        "gumgum.com",
-        "heyzap.com",
-        "hilltopads.net",
-        "hotjar.com",
-        "im-apps.net",
-        "impact-ad.jp",
-        "indexexchange.com",
-        "inmobi.com",
-        "innovid.com",
-        "intentiq.com",
-        "interclick.com",
-        "ipredictive.com",
-        "ironsrc.com",
-        "jads.co",
-        "jivox.com",
-        "juicyads.com",
-        "justpremium.com",
-        "kargo.com",
-        "kochava.com",
-        "kontera.com",
-        "krxd.net",
-        "lemmatechnologies.com",
-        "liftoff.io",
-        "lijit.com",
-        "liveintent.com",
-        "loopme.me",
-        "lotame.com",
-        "madvertise.de",
-        "mathtag.com",
-        "media.net",
-        "mediarithmics.com",
-        "mediaplex.com",
-        "mgid.com",
-        "millennialmedia.com",
-        "mixpanel.com",
-        "mobfox.com",
-        "moatads.com",
-        "monetag.com",
-        "mookie1.com",
-        "mopub.com",
-        "nativeads.com",
-        "nativo.com",
-        "netmng.com",
-        "nexage.com",
-        "nextmillennium.io",
-        "nowads.net",
-        "nr-data.net",
-        "nrich.ai",
-        "ntv.io",
-        "ogury.com",
-        "onetag.com",
-        "openx.net",
-        "outbrain.com",
-        "perfectaudience.com",
-        "permutive.com",
-        "pixalate.net",
-        "playwire.com",
-        "plista.com",
-        "popads.net",
-        "popcash.net",
-        "presage.io",
-        "propellerads.com",
-        "pubmatic.com",
-        "pulsepoint.com",
-        "quantcast.com",
-        "quantserve.com",
-        "remerge.io",
-        "revcontent.com",
-        "revjet.com",
-        "richaudience.com",
-        "rkdms.com",
-        "rlcdn.com",
-        "rubiconproject.com",
-        "scorecardresearch.com",
-        "seedtag.com",
-        "semasio.net",
-        "serving-sys.com",
-        "sharethrough.com",
-        "simpli.fi",
-        "sizmek.com",
-        "smaato.com",
-        "smartadserver.com",
-        "smartclip.net",
-        "smartyads.com",
-        "sonobi.com",
-        "sovrn.com",
-        "sparteo.com",
-        "specificclick.net",
-        "spotxchange.com",
-        "springserve.com",
-        "stackadapt.com",
-        "startappservice.com",
-        "statcounter.com",
-        "supersonicads.com",
-        "taboola.com",
-        "tapad.com",
-        "tapjoy.com",
-        "teads.tv",
-        "telaria.com",
-        "tidaltv.com",
-        "trafficjunky.com",
-        "tribalfusion.com",
-        "tremorhub.com",
-        "tubemogul.com",
-        "turn.com",
-        "undertone.com",
-        "unityads.unity3d.com",
-        "unrulymedia.com",
-        "vdopia.com",
-        "vidazoo.com",
-        "videologygroup.com",
-        "vungle.com",
-        "yieldlab.net",
-        "yieldmanager.com",
-        "yieldmo.com",
-        "yumenetworks.com",
-        "zedo.com",
-        "zergnet.com",
-        "zorosrv.com",
-        "zqtk.net",
-        "adcolony.com",
-        "admob.com",
-        "adwhirl.com",
-        "inner-active.com",
-        "jumptap.com",
-        "kiip.me",
-        "leadbolt.net",
-        "mobclix.com",
-        "tapreason.com",
-        "vserv.com",
-        "zimedia.co",
-        "doubleclick.net",
-        "googleadservices.com",
-        "googlesyndication.com",
-        "google-analytics.com",
-        "googletagmanager.com",
-        "analytics.google.com",
-        "connect.facebook.net",
-        "pixel.facebook.com",
-        "bat.bing.com",
-        "clarity.ms",
-        "hotjar.com",
-        "segment.io",
-        "amplitude.com",
-        "mixpanel.com",
-        "fullstory.com",
-        "heapanalytics.com",
-        "appsflyer.com",
-        "adjust.com",
-        "branch.io",
-        "ads.linkedin.com",
-        "px.ads.linkedin.com",
-        "ads.tiktok.com",
-        "analytics.tiktok.com",
-        "ads.pinterest.com",
-        "ads.reddit.com",
-        "ads.yahoo.com",
-        "ads.twitter.com"
-    ));
 
     /* URL-shape rules for ads that live on a first-party domain. They are
      * compiled into ONE pattern, so a request costs a single matcher pass
@@ -705,6 +430,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
      * flags must be volatile or a settings change could stay invisible there. */
     private volatile boolean trackingProtectionEnabled = true;
     private volatile boolean adBlockEnabled = true;
+    private AdBlockManager adBlockManager;
     private volatile boolean doNotTrack = true;
     private boolean fingerprintBlockEnabled = true;
     private boolean desktopMode = false;
@@ -793,6 +519,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         textZoom = prefs.getInt("textZoom", 100);
         cookiesMode = prefs.getString("cookiesMode", "all");
 
+        adBlockManager = new AdBlockManager(getContext().getFilesDir());
+        /* The hosts cache can be several megabytes: never read it on the main
+         * thread, the first page would wait for it. */
+        getBridge().execute(() -> adBlockManager.loadListsFromDisk());
+
         downloadExecutor = Executors.newFixedThreadPool(4);
         probeExecutor = Executors.newSingleThreadExecutor();
         downloadStateFile = new File(getContext().getFilesDir(), "paused_downloads.json");
@@ -806,6 +537,31 @@ public class EmbeddedWebViewPlugin extends Plugin {
             markStaleDownloads();
             restorePausedDownloads();
             notifyListeners("downloadsRestored", new JSObject());
+        });
+    }
+
+    /** Replaces the cached hosts with the union of the enabled filter lists. */
+    @PluginMethod
+    public void updateAdBlockLists(PluginCall call) {
+        JSONArray raw = call.getData().optJSONArray("urls");
+        List<String> urls = new ArrayList<>();
+        if (raw != null) {
+            for (int i = 0; i < raw.length(); i++) {
+                String url = raw.optString(i, "").trim();
+                if (!url.isEmpty()) urls.add(url);
+            }
+        }
+        AdBlockManager manager = adBlockManager;
+        if (manager == null) {
+            call.reject("Ad blocking is not ready yet.");
+            return;
+        }
+        getBridge().execute(() -> {
+            int hosts = manager.updateLists(urls);
+            JSObject data = new JSObject();
+            data.put("hosts", hosts);
+            notifyListeners("adblockUpdated", data);
+            call.resolve(data);
         });
     }
 
@@ -957,6 +713,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 view.getSettings().setForceDark(
                     webDarkMode ? WebSettings.FORCE_DARK_ON : WebSettings.FORCE_DARK_OFF
                 );
+                /* A page that ships its own dark theme keeps it; the user-agent
+                 * only darkens what has no theme at all. */
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+                    WebSettingsCompat.setForceDarkStrategy(
+                        view.getSettings(),
+                        WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
+                    );
+                }
             } catch (Exception ignored) {
             }
         }
@@ -1072,6 +836,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         view.setFocusable(true);
         view.setFocusableInTouchMode(true);
         view.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        /* Hardware layers keep the page composited; the drawing cache only adds
+         * a second full-page bitmap and is a known white-screen source. */
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        view.setDrawingCacheEnabled(false);
         applySettingsTo(view);
         view.setWebViewClient(new TabClient(id));
         view.setWebChromeClient(new TabChromeClient(id));
@@ -1208,28 +976,18 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
-    /* Walks the host's parent domains (ads.example.com -> example.com -> com)
-     * and stops at the first HashSet hit, so no list is scanned per request. */
-    private static boolean isAdHost(String host) {
-        if (host == null) return false;
-        String lower = host.toLowerCase(Locale.US);
-        int start = 0;
-        while (start < lower.length()) {
-            if (AD_DOMAINS.contains(lower.substring(start))) return true;
-            int dot = lower.indexOf('.', start);
-            if (dot < 0) break;
-            start = dot + 1;
-        }
-        return false;
+    private boolean isAdHost(String host) {
+        AdBlockManager manager = adBlockManager;
+        return manager != null && manager.isBlocked(host);
     }
 
     /**
-     * Full ad test for one request: the host list first (cheap, exact) and then
-     * the combined URL pattern for first-party ad paths such as /ads/,
-     * /pagead/ or ad-banner.js. Runs on the WebView IO thread, allocates
-     * nothing per rule and never waits on a lock, so it cannot block the UI.
+     * Full ad test for one request: the downloaded host set first and then the
+     * combined URL pattern for first-party ad paths such as /ads/, /pagead/ or
+     * ad-banner.js. Runs on the WebView IO thread, allocates nothing per rule
+     * and never waits on the network, so it cannot block the UI.
      */
-    private static boolean isBlockedRequest(String host, String url) {
+    private boolean isBlockedRequest(String host, String url) {
         if (isAdHost(host)) return true;
         if (url == null || url.isEmpty()) return false;
         try {
@@ -1364,6 +1122,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 tab.title = view.getTitle() == null ? tab.title : view.getTitle();
             }
             view.evaluateJavascript(TAP_STYLE_JS, null);
+            if (!webDarkMode) {
+                view.evaluateJavascript(LIGHT_COLOR_SCHEME_JS, null);
+            }
             if (adBlockEnabled) {
                 view.evaluateJavascript(AD_HIDE_CSS_JS, null);
             }

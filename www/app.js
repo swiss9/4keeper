@@ -80,6 +80,10 @@ const DEFAULT_SETTINGS = {
   trackingProtection: true,
   /* Privacy shields are opt-out: every fresh install starts protected. */
   adBlock: true,
+  /* Dynamic filter lists: StevenBlack ships on, AdAway is opt-in. */
+  adblockStevenBlack: true,
+  adblockAdAway: false,
+  adblockCustomLists: [],
   fingerprintBlock: true,
   doNotTrack: true,
   /* Stored only for now: the WebView has no per-app DNS resolver. */
@@ -2248,9 +2252,13 @@ function dashboardMetaText(item, group) {
      * the percentage), so the row answers "how fast" and "how big" at a glance. */
     const speed = formatSpeed(dashboardSpeedFor(item));
     const parts = [];
-    parts.push(speed || 'Starting…');
+    parts.push(speed || 'Downloading…');
     if (total > 0) parts.push(formatBytes(total));
-    else if (bytes > 0) parts.push(formatBytes(bytes) + ' downloaded');
+    else {
+      /* No Content-Length: never show a fake size or a 0% bar. */
+      parts.push('-- MB');
+      if (bytes > 0) parts.push(formatBytes(bytes) + ' downloaded');
+    }
     return parts.join(' · ');
   }
   if (group === 'finished') {
@@ -2748,6 +2756,13 @@ async function confirmDownloadPrompt() {
 
 /* ------------------------------------------------------ Long-press menu */
 
+/* A link that is already being fetched must not claim "Link copied": the row
+ * is the active download, not a new one. */
+function isActiveDownload(url) {
+  const target = String(url || '');
+  return downloadsCache.some((item) => String(item.url || '') === target && downloadStatusGroup(item) === 'downloading');
+}
+
 async function copyTextToClipboard(text, message) {
   const value = String(text || '');
   if (!value) return;
@@ -2765,7 +2780,7 @@ async function copyTextToClipboard(text, message) {
       document.execCommand('copy');
       document.body.removeChild(area);
     }
-    toast(message || 'Copied');
+    toast(message === 'Link copied' && isActiveDownload(value) ? 'Already downloading' : (message || 'Copied'));
   } catch (error) {
     toast('Could not copy');
   }
@@ -4809,6 +4824,59 @@ function settingsPageSearch() {
     `);
 }
 
+const ADBLOCK_LISTS = {
+  adblockStevenBlack: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts',
+  adblockAdAway: 'https://adaway.org/hosts.txt'
+};
+
+function adblockListUrls() {
+  const urls = [];
+  Object.keys(ADBLOCK_LISTS).forEach((key) => {
+    if (settings[key]) urls.push(ADBLOCK_LISTS[key]);
+  });
+  (settings.adblockCustomLists || []).forEach((url) => {
+    if (url && urls.indexOf(url) === -1) urls.push(url);
+  });
+  return urls;
+}
+
+function adblockCustomRows() {
+  return (settings.adblockCustomLists || []).map((url) => `
+    <div class="setting-row">
+      <span class="setting-text">
+        <span class="setting-label">${escapeHtml(url)}</span>
+        <span class="setting-desc">Custom list</span>
+      </span>
+      <button class="dl-row-btn" type="button" data-adblock-remove="${escapeHtml(url)}" aria-label="Remove filter list">${svgIcon('close', 'icon icon-xs')}</button>
+    </div>`).join('');
+}
+
+async function updateAdBlockFilters(button) {
+  const urls = adblockListUrls();
+  if (!urls.length) {
+    toast('Enable a filter list first');
+    return;
+  }
+  const label = button ? button.querySelector('.setting-label') : null;
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+  }
+  if (label) label.textContent = 'Updating filters…';
+  try {
+    await callPlugin('updateAdBlockLists', { urls });
+    toast('Filters Updated');
+  } catch (error) {
+    toast('Could not update filters');
+  } finally {
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+    if (label) label.textContent = 'Update Filters';
+  }
+}
+
 function settingsPagePrivacy() {
   return settingSection('Protection', `
       ${settingRowToggle('adBlock', 'Ad & Tracker Blocking', 'Block ad networks and hide ad containers')}
@@ -4817,6 +4885,16 @@ function settingsPagePrivacy() {
       ${settingRowToggle('doNotTrack', 'Do Not Track', 'Ask sites not to track you (DNT header)')}
       ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups (not active yet)')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
+    `) +
+    settingSection('AdBlock Filter Lists', `
+      ${settingRowToggle('adblockStevenBlack', 'StevenBlack Unified', 'Ads, trackers and malware hosts')}
+      ${settingRowToggle('adblockAdAway', 'AdAway', 'Community-maintained host list')}
+      ${adblockCustomRows()}
+      <div class="setting-row">
+        <input class="text-input" id="adblockCustomUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/hosts.txt" aria-label="Custom filter list URL">
+        <button class="btn btn-primary" type="button" data-action="adblockAdd">Add</button>
+      </div>
+      ${settingRowAction('shield', 'Update Filters', 'Download the enabled lists now', 'adblockUpdate')}
     `) +
     settingSection('Cookies', `
       ${settingRowButton('shield', 'Cookies', 'How sites may store cookies', cookiesLabel(), 'cookies')}
@@ -4958,6 +5036,21 @@ function closeSettingsScreen() {
 
 function handleSettingsAction(action) {
   switch (action) {
+    case 'adblockUpdate':
+      updateAdBlockFilters(dom.settingsPage.querySelector('[data-action="adblockUpdate"]'));
+      break;
+    case 'adblockAdd': {
+      const input = document.getElementById('adblockCustomUrl');
+      const value = input ? input.value.trim() : '';
+      if (!/^https?:\/\//i.test(value)) {
+        toast('Enter a list URL starting with http');
+        break;
+      }
+      const lists = (settings.adblockCustomLists || []).slice();
+      if (lists.indexOf(value) === -1) lists.push(value);
+      updateSetting({ adblockCustomLists: lists }, { rerender: true, toastMessage: 'List added' });
+      break;
+    }
     case 'theme':
       openChoice('Theme', [
         { value: 'system', label: 'System', desc: 'Follow the device setting' },
@@ -5752,6 +5845,14 @@ function attachUiListeners() {
         'fingerprintBlock'
       ].includes(key);
       updateSetting(patch, { reload, rerender: true });
+      return;
+    }
+    const remove = event.target.closest('[data-adblock-remove]');
+    if (remove) {
+      const url = remove.getAttribute('data-adblock-remove');
+      updateSetting({
+        adblockCustomLists: (settings.adblockCustomLists || []).filter((entry) => entry !== url)
+      }, { rerender: true, toastMessage: 'List removed' });
       return;
     }
     const action = event.target.closest('[data-action]');

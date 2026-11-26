@@ -88,7 +88,7 @@ const DEFAULT_SETTINGS = {
   adblockCustomLists: [],
   fingerprintBlock: true,
   doNotTrack: true,
-  /* Stored only for now: the WebView has no per-app DNS resolver. */
+  /* Sends WebView traffic through OkHttp with Cloudflare's DoH resolver. */
   dnsOverHttps: false,
   safeBrowsing: true,
   cookies: 'all',
@@ -1580,6 +1580,7 @@ function pushNativeSettings(reload) {
     isAdBlockEnabled: !!settings.adBlock,
     isFingerprintBlockEnabled: !!settings.fingerprintBlock,
     doNotTrack: !!settings.doNotTrack,
+    dnsOverHttps: !!settings.dnsOverHttps,
     speedLimit: Number(settings.speedLimit) || 0,
     connectionsPerFile: Number(settings.connectionsPerFile) || 1,
     zoomControls: !!settings.zoomControls,
@@ -1611,6 +1612,7 @@ const NATIVE_SETTING_KEYS = [
   'adBlock',
   'fingerprintBlock',
   'doNotTrack',
+  'dnsOverHttps',
   'speedLimit',
   'connectionsPerFile',
   'zoomControls',
@@ -4816,8 +4818,8 @@ function settingsPagePrivacy() {
       ${settingRowToggle('adBlock', 'Ad & Tracker Blocking', 'Block ad networks and hide ad containers')}
       ${settingRowToggle('fingerprintBlock', 'Fingerprint Protection', 'Spoof device details and canvas output')}
       ${settingRowToggle('trackingProtection', 'Tracking protection', 'Block known tracking hosts')}
-      ${settingRowToggle('doNotTrack', 'Do Not Track', 'Ask sites not to track you (DNT header)')}
-      ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups (not active yet)')}
+      ${settingRowToggle('doNotTrack', 'Do Not Track', 'Send DNT and Global Privacy Control headers')}
+      ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups through Cloudflare')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
     `) +
     settingSection('AdBlock Filter Lists', `

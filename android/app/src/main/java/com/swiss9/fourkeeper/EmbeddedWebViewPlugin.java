@@ -63,6 +63,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okhttp3.dnsoverhttps.DnsOverHttps;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -84,6 +92,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 @CapacitorPlugin(name = "EmbeddedWebView")
@@ -590,6 +599,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private volatile boolean adBlockEnabled = true;
     private AdBlockManager adBlockManager;
     private volatile boolean doNotTrack = true;
+    /* DoH only covers the requests OkHttp proxies; whatever stays native keeps
+     * the WebView's own system resolver. */
+    private volatile boolean dohEnabled = false;
+    private final OkHttpClient proxyClient = new OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build();
+    private volatile OkHttpClient dohClient;
     private boolean fingerprintBlockEnabled = true;
     private boolean desktopMode = false;
     private boolean pinchZoomEnabled = true;
@@ -663,6 +680,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         trackingProtectionEnabled = prefs.getBoolean("trackingProtectionEnabled", true);
         adBlockEnabled = prefs.getBoolean("adBlockEnabled", true);
         doNotTrack = prefs.getBoolean("doNotTrack", true);
+        dohEnabled = prefs.getBoolean("dohEnabled", false);
         fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", true);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
@@ -762,6 +780,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("trackingProtectionEnabled", trackingProtectionEnabled)
             .putBoolean("adBlockEnabled", adBlockEnabled)
             .putBoolean("doNotTrack", doNotTrack)
+            .putBoolean("dohEnabled", dohEnabled)
             .putInt("speedLimit", speedLimitKb)
             .putBoolean("fingerprintBlockEnabled", fingerprintBlockEnabled)
             .putBoolean("desktopMode", desktopMode)
@@ -887,11 +906,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
-    /* Loads a page with the privacy headers the user enabled. DNT is only sent
-     * on loads this method performs: link taps inside a page navigate on the
-     * WebView's own stack and carry no custom headers.
-     * shortcut: per-navigation DNT would need an intercepting proxy, add one if
-     * sites start ignoring the first request's header. */
+    /* Loads a page with the privacy headers the user enabled. Link taps are
+     * covered by proxiedResponse(); this keeps the first request of a load on
+     * the WebView's own stack. */
     private void loadPage(WebView view, String url) {
         if (view == null || url == null || url.isEmpty()) return;
         if (doNotTrack) {
@@ -1237,6 +1254,85 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
     }
 
+    /* Link taps never pass through loadPage(), so DNT and DoH are applied to
+     * the WebView's own requests here, on its IO thread. Anything OkHttp cannot
+     * reproduce exactly (POST bodies, byte ranges, downloads, media streams) is
+     * left to the WebView's native networking. Returns null in that case and on
+     * any failure, which also makes the WebView fall back to its own stack.
+     * shortcut: OkHttp follows redirects itself, so a redirected document keeps
+     * the URL it was requested from; replace with a native load if a site's
+     * relative links break after a redirect. */
+    private WebResourceResponse proxiedResponse(WebResourceRequest request) {
+        Uri uri = request.getUrl();
+        if (uri == null) return null;
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return null;
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return null;
+        String url = uri.toString();
+        if (isDownloadUrl(url) || mediaKind(url) != null) return null;
+        try {
+            Request.Builder builder = new Request.Builder().url(url).get();
+            for (Map.Entry<String, String> header : request.getRequestHeaders().entrySet()) {
+                String name = header.getKey();
+                if (name == null || header.getValue() == null) continue;
+                String lower = name.toLowerCase(Locale.ROOT);
+                /* Host and connection belong to the connection OkHttp opens
+                 * itself, Accept-Encoding would disable its transparent gzip,
+                 * Cookie is rebuilt from the cookie jar below, and the
+                 * conditional/range headers are dropped so a 304 or a partial
+                 * body is never handed over as if it were a full resource. */
+                if (lower.equals("host") || lower.equals("connection") || lower.equals("accept-encoding")
+                    || lower.equals("cookie") || lower.equals("range") || lower.equals("if-range")
+                    || lower.equals("if-none-match") || lower.equals("if-modified-since")) {
+                    continue;
+                }
+                builder.header(name, header.getValue());
+            }
+            String cookies = CookieManager.getInstance().getCookie(url);
+            if (cookies != null) builder.header("Cookie", cookies);
+            if (doNotTrack) {
+                builder.header("DNT", "1").header("Sec-GPC", "1");
+            }
+            OkHttpClient client = dohEnabled ? getDohClient() : proxyClient;
+            Response response = client.newCall(builder.build()).execute();
+            for (String setCookie : response.headers("Set-Cookie")) {
+                CookieManager.getInstance().setCookie(url, setCookie);
+            }
+            ResponseBody body = response.body();
+            MediaType type = body.contentType();
+            Map<String, String> headers = new LinkedHashMap<>();
+            for (String name : response.headers().names()) {
+                String lower = name.toLowerCase(Locale.ROOT);
+                /* OkHttp already ungzipped the body: forwarding the encoding or
+                 * the compressed length makes the WebView misread the stream. */
+                if (lower.equals("content-encoding") || lower.equals("content-length")
+                    || lower.equals("transfer-encoding") || lower.equals("connection")) {
+                    continue;
+                }
+                headers.put(name, response.header(name));
+            }
+            String mime = type == null ? null : type.type() + "/" + type.subtype();
+            String charset = type == null || type.charset() == null ? null : type.charset().name();
+            return new WebResourceResponse(mime, charset, response.code(), response.message(), headers, body.byteStream());
+        } catch (Exception error) {
+            return null;
+        }
+    }
+
+    /* Cloudflare's DoH endpoint resolves the names OkHttp connects to. */
+    private OkHttpClient getDohClient() {
+        OkHttpClient client = dohClient;
+        if (client == null) {
+            DnsOverHttps dns = new DnsOverHttps.Builder()
+                .client(new OkHttpClient())
+                .url(HttpUrl.get("https://cloudflare-dns.com/dns-query"))
+                .build();
+            client = proxyClient.newBuilder().dns(dns).build();
+            dohClient = client;
+        }
+        return client;
+    }
+
     private void injectFingerprintScript(WebView view) {
         if (view == null || !fingerprintBlockEnabled || !javaScriptEnabled) return;
         try {
@@ -1425,6 +1521,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
                  * host only shows up in the path. */
                 if (trackers && (isTracker(host) || isTrackerPath(url))) return blockedResponse();
                 detectMediaRequest(tabId, request);
+            }
+            /* Ad blocking answered above; everything else can go through OkHttp
+             * so DNT and DoH also cover link taps and sub-resources. */
+            if (doNotTrack || dohEnabled) {
+                WebResourceResponse proxied = proxiedResponse(request);
+                if (proxied != null) return proxied;
             }
             return null;
         }
@@ -2151,6 +2253,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("isAdBlockEnabled")) adBlockEnabled = data.optBoolean("isAdBlockEnabled", true);
         if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", true);
         if (data.has("doNotTrack")) doNotTrack = data.optBoolean("doNotTrack", true);
+        if (data.has("dnsOverHttps")) dohEnabled = data.optBoolean("dnsOverHttps", false);
         if (data.has("speedLimit")) {
             speedLimitKb = Math.max(0, data.optInt("speedLimit", 0));
             /* A cap changed while files are running applies to them too. */

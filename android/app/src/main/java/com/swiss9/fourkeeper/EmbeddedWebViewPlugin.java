@@ -104,24 +104,20 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "(d.head||d.documentElement).appendChild(m);}catch(e){}})();";
 
     /* Hides ad containers that survive network blocking (in-page slots, GPT
-     * wrappers, sponsored boxes) without touching legitimate layout.
-     * Class prefixes are anchored to a word start ("ad-" but not "load-more"),
-     * and iframe srcs need a path separator, so "uploads" never matches. */
+     * wrappers, sponsored boxes, pop-ups). Every selector wins with three
+     * !important properties. "ad-" also appears inside "download-", so the two
+     * ad- substring rules exclude download controls: this is a downloader, and
+     * hiding the page's own download buttons would break it. */
     private static final String AD_HIDE_CSS_JS =
         "(function(){try{"
             + "if(document.getElementById('4k-adhide'))return;"
-            + "var css='[id*=\"google_ads\"],[id*=\"div-gpt-ad\"],[id*=\"taboola\"],"
-            + "[id*=\"outbrain\"],[class*=\"ad-banner\"],[class*=\"ad-container\"],"
-            + "[class*=\"ad-slot\"],[class*=\"ad-wrapper\"],[class*=\"adsbygoogle\"],"
-            + "[class*=\"sponsored-ad\"],[data-ad-slot],[data-ad-client],"
-            + "[class^=\"ad-\"],[class*=\" ad-\"],[id^=\"ad-\"],[id*=\" ad-\"],"
-            + "[class*=\"advert\"],[id*=\"advert\"],"
-            + "[class*=\"sponsored\"],[class*=\"promoted\"],"
-            + "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
-            + "iframe[src*=\"amazon-adsystem.com\"],"
-            + "iframe[src*=\"/ads\"],iframe[src*=\"ads.\"],iframe[src*=\"ads/\"],"
-            + "iframe[src*=\"adservice\"],iframe[src*=\"pagead\"]"
-            + "{display:none!important;height:0!important;min-height:0!important;margin:0!important;"
+            + "var css='[id*=\"ad-\"]:not([id*=\"download\"]),"
+            + "[class*=\"ad-\"]:not([class*=\"download\"]),"
+            + "[id*=\"banner\"],[class*=\"banner\"],"
+            + "[class*=\"sponsor\"],[class*=\"popup\"],[class*=\"overlay\"],"
+            + "iframe[src*=\"ad\"],.adsbox,.ad-slot,.adsbygoogle"
+            + "{display:none!important;visibility:hidden!important;opacity:0!important;"
+            + "height:0!important;min-height:0!important;margin:0!important;"
             + "padding:0!important;border:0!important;overflow:hidden!important;}';"
             + "var s=document.createElement('style');s.id='4k-adhide';s.textContent=css;"
             + "(document.head||document.documentElement).appendChild(s);"
@@ -131,7 +127,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
      * injection is available, so the getters are in place for the first read.
      * Every override is guarded, so re-injection on later navigations is
      * harmless. */
-    private static final String PRIVACY_SCRIPT =
+    private static final String FINGERPRINT_JS =
         "(function(){try{"
             + "if(window.__4kPrivacy)return;window.__4kPrivacy=1;"
             + "var define=function(obj,key,value){try{"
@@ -165,6 +161,23 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "}catch(e){return raw.apply(this,args);}"
             + "};"
             + "proto.__4kNoise=1;}"
+            + "if(proto&&!proto.__4kImageNoise){"
+            + "var rawImage=proto.getImageData;"
+            + "proto.getImageData=function(){"
+            + "var img=rawImage.apply(this,arguments);"
+            + "try{for(var i=0;i<img.data.length;i+=97){"
+            + "img.data[i]=(img.data[i]+(Math.random()*3|0))&255;}}catch(e){}"
+            + "return img;};"
+            + "proto.__4kImageNoise=1;}"
+            + "var spoofGpu=function(gl){if(!gl||gl.__4kGpu)return;"
+            + "var raw=gl.getParameter;"
+            + "gl.getParameter=function(p){"
+            + "try{if(p===37445)return 'Intel Inc.';"
+            + "if(p===37446)return 'Intel(R) UHD Graphics 620';}catch(e){}"
+            + "return raw.apply(this,arguments);};"
+            + "gl.__4kGpu=1;};"
+            + "spoofGpu(window.WebGLRenderingContext&&WebGLRenderingContext.prototype);"
+            + "spoofGpu(window.WebGL2RenderingContext&&WebGL2RenderingContext.prototype);"
             + "}catch(e){}})();";
 
     private static final String MEDIA_SCAN_JS =
@@ -183,6 +196,130 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "var a=document.querySelectorAll('a[href]');"
             + "for(var l=0;l<a.length&&out.length<8;l++){var h=a[l].href;var hk=kind(h||'');if(hk)add(h,hk);}"
             + "return out.slice(0,8);})()";
+
+    /* Quetta-style media sniffer, drawn inside the page so it belongs to the tab
+     * that found the media. Everything is built with JS and inline styles: a
+     * <style> block is dropped by a strict CSP, and a shadow root keeps page
+     * stylesheets from repainting the sheet. */
+    private static final String SNIFFER_JS =
+        "(function(){try{"
+            + "if(window.__4kSniffer)return;"
+            + "var d=document;"
+            + "var host=d.createElement('div');"
+            + "host.id='4k-sniffer';"
+            + "host.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;z-index:2147483647';"
+            + "if(!host.attachShadow)return;"
+            + "var root=host.attachShadow({mode:'open'});"
+            + "var fab=d.createElement('button');"
+            + "fab.type='button';"
+            + "fab.setAttribute('aria-label','Media on this page');"
+            + "fab.style.cssText='position:fixed;right:16px;bottom:92px;width:48px;height:48px;border:0;"
+            + "border-radius:50%;background:#fafafa;color:#09090b;display:none;align-items:center;"
+            + "justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.45);cursor:pointer;padding:0;"
+            + "font:700 22px/1 system-ui,sans-serif';"
+            + "fab.textContent='\\u2193';"
+            + "var badge=d.createElement('span');"
+            + "badge.style.cssText='position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;"
+            + "border-radius:9px;background:#09090b;color:#fafafa;font:700 10px/18px system-ui,sans-serif;"
+            + "text-align:center;padding:0 4px;box-sizing:border-box';"
+            + "fab.appendChild(badge);"
+            + "var scrim=d.createElement('div');"
+            + "scrim.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;"
+            + "pointer-events:none;transition:opacity .18s;z-index:2147483646';"
+            + "var sheet=d.createElement('div');"
+            + "sheet.setAttribute('role','dialog');"
+            + "sheet.setAttribute('aria-label','Media on this page');"
+            + "sheet.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;max-height:62vh;"
+            + "overflow:auto;background:#121212;color:#fafafa;border:1px solid #27272a;border-radius:20px;"
+            + "padding:8px 10px 14px;transform:translateY(130%);transition:transform .22s ease;"
+            + "z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;"
+            + "box-shadow:0 18px 50px rgba(0,0,0,.55);box-sizing:border-box';"
+            + "var head=d.createElement('div');"
+            + "head.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px';"
+            + "var title=d.createElement('div');"
+            + "title.textContent='Media on this page';"
+            + "title.style.cssText='font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#a1a1aa';"
+            + "var close=d.createElement('button');"
+            + "close.type='button';"
+            + "close.textContent='Close';"
+            + "close.style.cssText='border:0;background:transparent;color:#fafafa;font-size:12px;font-weight:600;padding:6px 8px;cursor:pointer';"
+            + "head.appendChild(title);head.appendChild(close);"
+            + "var list=d.createElement('div');"
+            + "sheet.appendChild(head);sheet.appendChild(list);"
+            + "root.appendChild(fab);root.appendChild(scrim);root.appendChild(sheet);"
+            + "(d.body||d.documentElement).appendChild(host);"
+            + "var items=[];"
+            + "function openSheet(){scrim.style.opacity='1';scrim.style.pointerEvents='auto';sheet.style.transform='translateY(0)';}"
+            + "function closeSheet(){scrim.style.opacity='0';scrim.style.pointerEvents='none';sheet.style.transform='translateY(130%)';}"
+            + "function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}"
+            + "function nameOf(u){try{var n=decodeURIComponent(u.split('#')[0].split('?')[0].split('/').pop()||'');"
+            + "return n||u;}catch(e){return u;}}"
+            + "function qualityOf(u,k){"
+            + "var m=u.match(/(\\d{3,4})x(\\d{3,4})/);"
+            + "if(m)return m[2]+'p';"
+            + "m=u.match(/(2160|1440|1080|720|480|360)p/i);"
+            + "if(m)return m[1]+'p';"
+            + "if(/4k|uhd/i.test(u))return '4K';"
+            + "if(k==='hls')return 'HLS';"
+            + "if(k==='dash')return 'DASH';"
+            + "if(k==='audio')return 'AUDIO';"
+            + "return 'VIDEO';}"
+            + "function posterFor(u){"
+            + "var v=d.querySelectorAll('video');"
+            + "for(var i=0;i<v.length;i++){var s=v[i].currentSrc||v[i].src||'';"
+            + "if(s&&(s===u||v[i].getAttribute('src')===u))return v[i].poster||'';}"
+            + "return '';}"
+            + "function row(item){"
+            + "var r=d.createElement('div');"
+            + "r.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 4px;border-top:1px solid #1f1f22';"
+            + "var thumb=d.createElement('div');"
+            + "thumb.style.cssText='flex:0 0 auto;width:46px;height:46px;border-radius:10px;overflow:hidden;"
+            + "background:#1e1e1e;display:flex;align-items:center;justify-content:center;"
+            + "font:700 10px system-ui,sans-serif;color:#a1a1aa';"
+            + "var poster=posterFor(item.url);"
+            + "if(poster){var img=d.createElement('img');img.src=poster;img.alt='';"
+            + "img.style.cssText='width:100%;height:100%;object-fit:cover';thumb.appendChild(img);}"
+            + "else{thumb.textContent=item.kind==='audio'?'AUD':'VID';}"
+            + "var meta=d.createElement('div');"
+            + "meta.style.cssText='flex:1 1 auto;min-width:0';"
+            + "var name=d.createElement('div');"
+            + "name.textContent=nameOf(item.url);"
+            + "name.style.cssText='font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';"
+            + "var sub=d.createElement('div');"
+            + "sub.textContent=qualityOf(item.url,item.kind)+' \\u00b7 '+(item.kind==='audio'?'Audio':'Video');"
+            + "sub.style.cssText='font-size:11px;color:#a1a1aa;margin-top:2px';"
+            + "meta.appendChild(name);meta.appendChild(sub);"
+            + "var acts=d.createElement('div');"
+            + "acts.style.cssText='flex:0 0 auto;display:flex;flex-direction:column;gap:6px';"
+            + "var play=d.createElement('button');"
+            + "play.type='button';play.textContent='Play';"
+            + "play.style.cssText='border:1px solid #3f3f46;border-radius:9px;background:transparent;color:#fafafa;"
+            + "font:600 11px system-ui,sans-serif;padding:6px 10px;cursor:pointer';"
+            + "play.onclick=function(e){e.stopPropagation();closeSheet();"
+            + "try{window.FourKeeperHost.playMedia(item.url,item.kind||'video');}catch(err){}};"
+            + "var dl=d.createElement('button');"
+            + "dl.type='button';dl.textContent='Download';"
+            + "dl.style.cssText='border:0;border-radius:9px;background:#fafafa;color:#09090b;"
+            + "font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer';"
+            + "dl.onclick=function(e){e.stopPropagation();closeSheet();"
+            + "try{window.FourKeeperHost.downloadMedia(item.url,item.kind||'video');}catch(err){}};"
+            + "acts.appendChild(play);acts.appendChild(dl);"
+            + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
+            + "return r;}"
+            + "function render(){"
+            + "clear(list);"
+            + "if(!items.length){fab.style.display='none';closeSheet();return;}"
+            + "badge.textContent=String(items.length);"
+            + "fab.style.display='flex';"
+            + "for(var i=0;i<items.length;i++)list.appendChild(row(items[i]));}"
+            + "fab.onclick=function(){openSheet();};"
+            + "scrim.onclick=closeSheet;"
+            + "close.onclick=closeSheet;"
+            + "window.__4kSniffer={update:function(next){items=Array.isArray(next)?next:[];render();}};"
+            + "try{if(!window.matchMedia||!window.matchMedia('(prefers-reduced-motion: reduce)').matches){"
+            + "fab.animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}],"
+            + "{duration:2400,iterations:Infinity,easing:'ease-in-out'});}}catch(e){}"
+            + "}catch(e){}})();";
 
     private static final String[] TRACKER_HOSTS = new String[] {
         "doubleclick.net",
@@ -335,6 +472,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         String url = "";
         String title = "";
         ScriptHandler privacyHandler;
+        /* Main-frame URLs in navigation order. WebView drops its own entry when
+         * an error page replaces a failed load, so Back needs this stack to
+         * still reach the last page that actually rendered. */
+        final ArrayList<String> history = new ArrayList<>();
+        boolean errorPage = false;
 
         Tab(int id, WebView view) {
             this.id = id;
@@ -746,6 +888,26 @@ public class EmbeddedWebViewPlugin extends Plugin {
         view.loadUrl(url);
     }
 
+    /* One entry per rendered page. Going back through the WebView lands on the
+     * previous entry again, so that repeat is folded instead of appended. */
+    private static void recordHistory(Tab tab, String url) {
+        if (tab == null || url == null || url.isEmpty()) return;
+        int last = tab.history.size() - 1;
+        if (last >= 0 && url.equals(tab.history.get(last))) return;
+        if (last >= 1 && url.equals(tab.history.get(last - 1))) {
+            tab.history.remove(last);
+            return;
+        }
+        tab.history.add(url);
+        if (tab.history.size() > 50) tab.history.remove(0);
+    }
+
+    /** Back is possible through the WebView or through our own stack. */
+    private static boolean canGoBack(Tab tab) {
+        if (tab == null) return false;
+        return tab.view.canGoBack() || tab.errorPage || tab.history.size() >= 2;
+    }
+
     private void applyActiveVisibility() {
         for (Tab tab : tabs.values()) {
             int desired = (tab.id == activeTabId && browserVisible) ? View.VISIBLE : View.INVISIBLE;
@@ -794,6 +956,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         } else {
             bringOverlayToFront();
         }
+        /* The button is drawn per page, so a tab that was in the background
+         * still has its own (empty or filled) sniffer state. */
+        pushSniffer(tab.id);
     }
 
     /**
@@ -830,6 +995,37 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 notifyListeners("contextMenuRequest", data);
             });
         }
+
+        /* Sniffer actions. Both arrive on a WebView thread, so the work is
+         * handed to the UI thread; nothing here trusts the page beyond the URL
+         * it was given (the download path validates the scheme again). */
+        @JavascriptInterface
+        public void downloadMedia(String url, String kind) {
+            if (url == null || url.isEmpty()) return;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            final String target = url;
+            final String mime = mimeForMediaKind(kind, url);
+            activity.runOnUiThread(() -> enqueueDownload(target, "", "", mime, tabId));
+        }
+
+        @JavascriptInterface
+        public void playMedia(String url, String kind) {
+            if (url == null || url.isEmpty()) return;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            final String target = url;
+            final String resolved = kind == null ? "" : kind;
+            activity.runOnUiThread(() -> {
+                Intent intent = new Intent(activity, VideoPlayerActivity.class);
+                intent.putExtra(VideoPlayerActivity.EXTRA_URL, target);
+                intent.putExtra(VideoPlayerActivity.EXTRA_KIND, resolved);
+                try {
+                    activity.startActivity(intent);
+                } catch (Exception ignored) {
+                }
+            });
+        }
     }
 
     private Tab createTabInternal(String url) {
@@ -855,7 +1051,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         Tab tab = new Tab(id, view);
         tabs.put(id, tab);
-        syncPrivacyScript(tab);
+        syncFingerprintScript(tab);
 
         FrameLayout root = rootView();
         if (root != null) {
@@ -937,7 +1133,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         object.put("id", tab.id);
         object.put("url", tab.url == null ? "" : tab.url);
         object.put("title", tab.title == null ? "" : tab.title);
-        object.put("canGoBack", tab.view.canGoBack());
+        object.put("canGoBack", canGoBack(tab));
         object.put("canGoForward", tab.view.canGoForward());
         return object;
     }
@@ -993,6 +1189,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private boolean isBlockedRequest(String host, String url) {
         if (isAdHost(host)) return true;
         if (url == null || url.isEmpty()) return false;
+        /* Path-level rules: /ads/, /banners/, /popunder/, /sponsored/ are ads
+         * whatever domain serves them. */
+        if (AdBlockManager.isBlockedPath(url)) return true;
         try {
             return AD_URL_PATTERN.matcher(url).find();
         } catch (Exception error) {
@@ -1020,10 +1219,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
     }
 
-    private void injectPrivacyScript(WebView view) {
+    private void injectFingerprintScript(WebView view) {
         if (view == null || !fingerprintBlockEnabled || !javaScriptEnabled) return;
         try {
-            view.evaluateJavascript(PRIVACY_SCRIPT, null);
+            view.evaluateJavascript(FINGERPRINT_JS, null);
         } catch (Exception ignored) {
         }
     }
@@ -1031,7 +1230,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
     /* Document-start injection is the only point where the overrides exist
      * before page scripts read them. onPageStarted keeps the evaluateJavascript
      * fallback for WebViews without that feature. */
-    private void syncPrivacyScript(Tab tab) {
+    private void syncFingerprintScript(Tab tab) {
         if (tab == null) return;
         try {
             if (tab.privacyHandler != null) {
@@ -1045,7 +1244,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 tab.privacyHandler = WebViewCompat.addDocumentStartJavaScript(
                     tab.view,
-                    PRIVACY_SCRIPT,
+                    FINGERPRINT_JS,
                     Collections.singleton("*")
                 );
             }
@@ -1108,8 +1307,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
             Tab tab = tabs.get(tabId);
             if (tab != null && url != null && !"about:blank".equals(url) && !url.startsWith("data:")) {
                 tab.url = url;
+                tab.errorPage = false;
+                recordHistory(tab, url);
             }
-            injectPrivacyScript(view);
+            injectFingerprintScript(view);
             JSObject data = new JSObject();
             data.put("tabId", tabId);
             data.put("activeTabId", activeTabId);
@@ -1135,12 +1336,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 view.evaluateJavascript(CONTEXT_MENU_JS, null);
             }
             if (snifferEnabled) {
+                view.evaluateJavascript(SNIFFER_JS, null);
                 view.evaluateJavascript(MEDIA_SCAN_JS, value -> handleScannedMedia(tabId, value));
+                pushSniffer(tabId);
             }
             JSObject data = tabState(tab);
             data.put("tabId", tabId);
             data.put("activeTabId", activeTabId);
-            data.put("canGoBack", view.canGoBack());
+            data.put("canGoBack", canGoBack(tab));
             data.put("canGoForward", view.canGoForward());
             data.put("title", view.getTitle() == null ? "" : view.getTitle());
             String icon = encodeFavicon(view.getFavicon());
@@ -1162,6 +1365,16 @@ public class EmbeddedWebViewPlugin extends Plugin {
             data.put("code", error.getErrorCode());
             data.put("message", message);
             notifyListeners("pageError", data);
+            Tab tab = tabs.get(tabId);
+            if (tab != null) {
+                tab.errorPage = true;
+                /* The failed navigation never became a page: drop it so Back
+                 * returns to the previous one instead of retrying a dead URL. */
+                int last = tab.history.size() - 1;
+                if (last >= 0 && failedUrl.equals(tab.history.get(last))) {
+                    tab.history.remove(last);
+                }
+            }
             view.loadDataWithBaseURL(null, errorPage(message, failedUrl), "text/html", "utf-8", null);
         }
 
@@ -1186,6 +1399,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 return blockedResponse();
             }
             if (!mainFrame) {
+                /* Sub-resources and sub-frames take the same path: an iframe
+                 * whose URL is on the blocklist is dropped exactly like an ad
+                 * script, so a nested ad frame never gets to load. */
                 if (ads && isBlockedRequest(host, url)) return blockedResponse();
                 /* Host and path are both checked: a tracker on a first-party
                  * host only shows up in the path. */
@@ -1383,6 +1599,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         data.put("source", source == null ? "" : source);
         data.put("title", mediaTitleForTab(tabId));
         notifyListeners("mediaDetected", data);
+        pushSniffer(tabId);
     }
 
     private void handleScannedMedia(int tabId, String value) {
@@ -1410,6 +1627,50 @@ public class EmbeddedWebViewPlugin extends Plugin {
         data.put("activeTabId", activeTabId);
         data.put("reason", reason == null ? "" : reason);
         notifyListeners("mediaCleared", data);
+        pushSniffer(tabId);
+    }
+
+    /* Draws the floating button inside the page for one tab. Only the visible
+     * tab is pushed: a background tab must never paint over the page the user
+     * is reading. */
+    private void pushSniffer(int tabId) {
+        if (!snifferEnabled || !javaScriptEnabled) return;
+        if (tabId != activeTabId) return;
+        Tab tab = tabs.get(tabId);
+        if (tab == null) return;
+        JSONArray items = new JSONArray();
+        synchronized (tabMedia) {
+            LinkedHashMap<String, String> map = tabMedia.get(tabId);
+            if (map != null) {
+                for (Map.Entry<String, String> entry : map.entrySet()) {
+                    try {
+                        JSONObject item = new JSONObject();
+                        item.put("url", entry.getKey());
+                        item.put("kind", entry.getValue());
+                        items.put(item);
+                    } catch (Exception ignored) {
+                        /* org.json throws a checked JSONException in the Android
+                         * stub jar; one bad item must not drop the rest. */
+                    }
+                }
+            }
+        }
+        try {
+            tab.view.evaluateJavascript(
+                "window.__4kSniffer&&window.__4kSniffer.update(" + items + ");", null);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String mimeForMediaKind(String kind, String url) {
+        String resolved = kind == null || kind.isEmpty() ? mediaKind(url) : kind;
+        if ("hls".equals(resolved)) return "application/vnd.apple.mpegurl";
+        if ("dash".equals(resolved)) return "application/dash+xml";
+        if ("audio".equals(resolved)) {
+            String lower = url == null ? "" : url.toLowerCase(Locale.US);
+            return lower.contains(".m4a") || lower.contains(".aac") ? "audio/mp4" : "audio/mpeg";
+        }
+        return "video/mp4";
     }
 
     private void forgetTabMedia(int tabId) {
@@ -1614,8 +1875,22 @@ public class EmbeddedWebViewPlugin extends Plugin {
     public void goBack(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
-            boolean moved = tab != null && tab.view.canGoBack();
-            if (moved) tab.view.goBack();
+            boolean moved = false;
+            if (tab != null) {
+                if (tab.view.canGoBack()) {
+                    tab.view.goBack();
+                    moved = true;
+                } else if (tab.errorPage && !tab.history.isEmpty()) {
+                    /* The error page replaced the WebView's entry, so its own
+                     * history is gone: reopen the last page that rendered. */
+                    loadPage(tab.view, tab.history.get(tab.history.size() - 1));
+                    moved = true;
+                } else if (tab.history.size() >= 2) {
+                    tab.history.remove(tab.history.size() - 1);
+                    loadPage(tab.view, tab.history.get(tab.history.size() - 1));
+                    moved = true;
+                }
+            }
             JSObject result = new JSObject();
             result.put("moved", moved);
             call.resolve(result);
@@ -1726,7 +2001,20 @@ public class EmbeddedWebViewPlugin extends Plugin {
     @PluginMethod
     public void setSnifferEnabled(PluginCall call) {
         snifferEnabled = call.getBoolean("enabled", true);
-        call.resolve();
+        getActivity().runOnUiThread(() -> {
+            if (!snifferEnabled) {
+                for (Tab tab : tabs.values()) {
+                    try {
+                        tab.view.evaluateJavascript(
+                            "window.__4kSniffer&&window.__4kSniffer.update([]);", null);
+                    } catch (Exception ignored) {
+                    }
+                }
+            } else {
+                pushSniffer(activeTabId);
+            }
+            call.resolve();
+        });
     }
 
     @PluginMethod
@@ -1848,7 +2136,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             for (Tab tab : tabs.values()) {
                 applySettingsTo(tab.view);
-                syncPrivacyScript(tab);
+                syncFingerprintScript(tab);
             }
         });
         call.resolve();
@@ -2006,7 +2294,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             Tab tab = getActiveTab();
             JSObject result = new JSObject();
-            result.put("canGoBack", tab != null && tab.view.canGoBack());
+            result.put("canGoBack", canGoBack(tab));
             result.put("canGoForward", tab != null && tab.view.canGoForward());
             result.put("url", tab == null ? "" : (tab.url == null ? "" : tab.url));
             call.resolve(result);

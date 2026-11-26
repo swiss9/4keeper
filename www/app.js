@@ -296,9 +296,6 @@ const dom = {
   dlMenuMeta: $('dlMenuMeta'),
   dlMenuList: $('dlMenuList'),
   contextMenu: $('contextMenu'),
-  dashboardMedia: $('dashboardMedia'),
-  dashboardMediaList: $('dashboardMediaList'),
-  dashboardMediaCount: $('dashboardMediaCount'),
   navDashboardBtn: $('navDashboardBtn'),
   navBrowserBtn: $('navBrowserBtn'),
   navSettingsBtn: $('navSettingsBtn'),
@@ -897,7 +894,9 @@ function setSecurityIcon(url) {
 function setNav(canBack, canForward) {
   navCanBack = !!canBack;
   navCanForward = !!canForward;
-  if (dom.backBtn) dom.backBtn.disabled = !navCanBack;
+  /* Back always works in the browser: with no history left it opens the
+   * dashboard, so the button is never a dead end. */
+  if (dom.backBtn) dom.backBtn.disabled = false;
   if (dom.forwardBtn) dom.forwardBtn.disabled = !navCanForward;
 }
 
@@ -1828,7 +1827,6 @@ async function refreshTabMedia() {
   }
   updateDownloadsIndicator();
   if (overlays.has('tabs')) renderTabs();
-  if (dashboardActive) renderDashboardMedia();
 }
 
 function rebuildTabDownloadIndex() {
@@ -2058,10 +2056,19 @@ async function navigate(raw) {
 }
 
 async function goBack() {
-  if (!tabs.length || !navCanBack) return;
+  if (!tabs.length) return;
+  let moved = false;
   try {
-    await callPlugin('goBack');
+    /* The native layer owns the real history, including the entry that an
+     * error page (ERR_CONNECTION_REFUSED and friends) replaced. */
+    const result = await callPlugin('goBack');
+    moved = !result || result.moved !== false;
   } catch (error) {
+    moved = false;
+  }
+  if (!moved) {
+    /* Nothing left to go back to: Back means Home, never a dead end. */
+    showDashboard();
     return;
   }
   setLoading(true);
@@ -2080,77 +2087,6 @@ async function goForward() {
 }
 
 /* ------------------------------------------------------------- Dashboard */
-
-function dashboardMediaItems() {
-  const items = [];
-  /* The same stream is commonly requested by several tabs (and by both the
-   * network sniffer and the page scan). Listing it once keeps the sheet stable
-   * instead of stacking identical rows when five tabs find the same file. */
-  const seen = new Set();
-  Object.keys(tabMedia).forEach((id) => {
-    const tabId = Number(id);
-    if (!Number.isFinite(tabId) || tabId < 0) return;
-    const entry = tabMedia[tabId];
-    if (!entry || typeof entry !== 'object') return;
-    const tab = tabs.find((candidate) => candidate && candidate.id === tabId) || null;
-    Object.keys(entry).forEach((url) => {
-      if (seen.has(url)) return;
-      seen.add(url);
-      items.push({
-        url,
-        kind: entry[url] || 'video',
-        tabId,
-        pageTitle: (tab && tab.title) || '',
-        host: hostOf(url) || hostOf(tab && tab.url)
-      });
-    });
-  });
-  return items;
-}
-
-/* Media rows are addressed by index, so the exact list that was painted must be
- * kept: rebuilds happen on every detection and a stale index would otherwise
- * download a different file than the row the user tapped. */
-let renderedMediaItems = [];
-let dashboardMediaFrame = 0;
-const MAX_DASHBOARD_MEDIA_ROWS = 40;
-
-function scheduleDashboardMediaRender() {
-  if (dashboardMediaFrame) return;
-  dashboardMediaFrame = window.requestAnimationFrame(() => {
-    dashboardMediaFrame = 0;
-    renderDashboardMedia();
-  });
-}
-
-function renderDashboardMedia() {
-  if (!dom.dashboardMedia || !dom.dashboardMediaList) return;
-  const items = dashboardMediaItems();
-  const shown = items.slice(0, MAX_DASHBOARD_MEDIA_ROWS);
-  renderedMediaItems = shown;
-  if (dom.dashboardMediaCount) dom.dashboardMediaCount.textContent = String(items.length);
-  dom.dashboardMedia.classList.toggle('hidden', items.length === 0);
-  if (!items.length) {
-    dom.dashboardMediaList.innerHTML = '';
-    return;
-  }
-  const overflow = items.length - shown.length;
-  dom.dashboardMediaList.innerHTML = shown.map((item, index) => {
-    const isAudio = /audio/i.test(item.kind);
-    const label = isAudio ? 'AUDIO' : 'VIDEO';
-    return `
-      <div class="dashboard-media-item">
-        <span class="dashboard-media-badge" aria-hidden="true">${label}</span>
-        <div class="dashboard-media-meta">
-          <div class="dashboard-media-url" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div>
-          <div class="dashboard-media-host">${escapeHtml(item.host || 'Media file')}</div>
-        </div>
-        <button class="dashboard-media-download" type="button" data-media-download="${index}">Download</button>
-      </div>`;
-  }).join('') + (overflow > 0
-    ? `<p class="dashboard-media-more">+${overflow} more on other tabs</p>`
-    : '');
-}
 
 const DASHBOARD_CATEGORY_ICONS = {
   videos: 'video',
@@ -3016,27 +2952,6 @@ async function checkClipboardForLink() {
   }
 }
 
-async function downloadDashboardMedia(index, button) {
-  const item = renderedMediaItems[index] || dashboardMediaItems()[index];
-  if (!item) return;
-  const label = button ? button.textContent : '';
-  if (button) {
-    button.disabled = true;
-    button.textContent = 'Starting…';
-  }
-  try {
-    await callPlugin('downloadMedia', { url: item.url, tabId: item.tabId, kind: item.kind });
-    toast('Download started');
-  } catch (error) {
-    toast('Could not start this download');
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = label || 'Download';
-    }
-  }
-}
-
 /* ---------------------------------------------------------- Quick access */
 
 const QUICK_ACCESS_DEFAULT = [
@@ -3245,7 +3160,6 @@ function setAppMode(mode) {
     hideNativeWebView();
     if (overlays.has('menu')) closeMenu();
     if (overlays.has('siteInfo')) closeSiteInfo();
-    renderDashboardMedia();
     renderDashboardQueue();
   } else {
     const tab = activeTab();
@@ -5556,15 +5470,6 @@ function attachUiListeners() {
     else if (overlays.has('quickAdd')) closeQuickAdd();
   });
   if (dom.downloadPasteBtn) dom.downloadPasteBtn.addEventListener('click', pasteIntoDownloadInput);
-  if (dom.dashboardMediaList) {
-    dom.dashboardMediaList.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-media-download]');
-      if (!button) return;
-      const index = Number(button.getAttribute('data-media-download'));
-      if (!Number.isFinite(index)) return;
-      downloadDashboardMedia(index, button);
-    });
-  }
 
   if (dom.navBrowserBtn) {
     dom.navBrowserBtn.addEventListener('click', openBrowserFromDashboard);
@@ -6112,11 +6017,7 @@ function attachNativeListeners() {
     if (!noteTabMedia(tabId, data.url, data.kind)) return;
     updateDownloadsIndicator();
     scheduleTabsRender();
-    if (dashboardActive) {
-      /* Detections arrive in bursts (one per media request); coalesce them into
-       * a single repaint per frame instead of rebuilding the list each time. */
-      scheduleDashboardMediaRender();
-    } else if (!overlays.size && nativeVisibleState) {
+    if (!dashboardActive && !overlays.size && nativeVisibleState) {
       announceTabMedia(tabId);
     }
   });
@@ -6128,7 +6029,6 @@ function attachNativeListeners() {
     dropTabMedia(tabId);
     updateDownloadsIndicator();
     scheduleTabsRender();
-    if (dashboardActive) scheduleDashboardMediaRender();
   });
 
   listen('downloadStarted', (data) => {
@@ -6260,40 +6160,8 @@ function handleBack() {
   /* The dashboard has no page behind it, so Back must not steer the hidden
    * WebView; the caller minimises the app instead. */
   if (isDashboardMode) return false;
-  if (navCanBack) {
-    goBack();
-    return true;
-  }
-  return false;
-}
-
-/* navCanBack only ever describes the last pageLoaded event, so it misses
- * in-page history pushes (SPA routes, hash changes) and would make a single
- * Back press minimise the app while the page still has history. Ask the native
- * layer instead, behind a re-entrancy guard: holding Back used to queue one
- * getNavigationState()/goBack() pair per press. */
-let backBusy = false;
-
-async function backInBrowser() {
-  if (isDashboardMode || booting) return false;
-  /* Holding down Back used to queue one getNavigationState()/goBack() pair per
-   * press, so a single intent could skip several pages of history. */
-  if (backBusy) return true;
-  const plugin = getPlugin();
-  if (!plugin || typeof plugin.getNavigationState !== 'function') return false;
-  backBusy = true;
-  try {
-    const state = await plugin.getNavigationState();
-    if (!state || state.canGoBack !== true) return false;
-    const moved = await callPlugin('goBack');
-    setLoading(true);
-    window.setTimeout(syncNav, 250);
-    return !moved || moved.moved !== false;
-  } catch (error) {
-    return false;
-  } finally {
-    backBusy = false;
-  }
+  goBack();
+  return true;
 }
 
 async function minimizeApp() {
@@ -6415,20 +6283,11 @@ async function boot() {
 
   if (App && typeof App.addListener === 'function') {
     App.addListener('backButton', () => {
-      /* Back must never hard-kill the task. Overlays close first, the dashboard
-       * sends the app to the background, and a page only leaves once it has no
-       * history left to go back to. */
+      /* Back must never hard-kill the task. Overlays close first, a page walks
+       * its history and falls back to the dashboard, and only the dashboard
+       * sends the app to the background. */
       if (handleBack()) return;
-      if (isDashboardMode) {
-        minimizeApp();
-        return;
-      }
-      backInBrowser()
-        .then((moved) => {
-          if (!moved) return minimizeApp();
-          return null;
-        })
-        .catch(() => minimizeApp());
+      minimizeApp();
     });
     App.addListener('appStateChange', (state) => {
       if (!state || state.isActive === false) {

@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Hosts-file ad blocking: downloads the lists the user enabled, keeps the union
@@ -38,6 +39,25 @@ public class AdBlockManager {
         "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
         "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_ads_justdomains.txt"
     ));
+
+    /* Ad paths that live on an otherwise innocent domain. A hosts list cannot
+     * see them, so the URL itself is checked: /ads/, /banners/, /popunder/ and
+     * /sponsored/ are blocked wherever they appear. The slashes on both sides
+     * keep /downloads/ and /banner-upload/ out of the match. */
+    private static final Pattern AD_PATH = Pattern.compile(
+        "/(?:ads?|banners?|popunder|sponsored)/",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    /** True when the URL carries one of the common ad paths, whatever the host. */
+    public static boolean isBlockedPath(String url) {
+        if (url == null || url.isEmpty()) return false;
+        try {
+            return AD_PATH.matcher(url).find();
+        } catch (Exception error) {
+            return false;
+        }
+    }
 
     private final File hostsFile;
     private final HashSet<String> blockedHosts = new HashSet<>();
@@ -79,8 +99,7 @@ public class AdBlockManager {
     }
 
     /** True for the host and any parent domain listed in a hosts file. */
-    public synchronized boolean isBlocked(String host) {
-        if (host == null) return false;
+    public synchronized boolean isBlocked(String host) {        if (host == null) return false;
         String lower = host.toLowerCase(Locale.US);
         int start = 0;
         while (start < lower.length()) {

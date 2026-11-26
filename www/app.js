@@ -80,8 +80,10 @@ const DEFAULT_SETTINGS = {
   trackingProtection: true,
   /* Privacy shields are opt-out: every fresh install starts protected. */
   adBlock: true,
-  /* Dynamic filter lists: StevenBlack ships on, AdAway is opt-in. */
+  /* Dynamic filter lists: the three DNS lists ship on, AdAway is opt-in. */
   adblockStevenBlack: true,
+  adblockPeterLowe: true,
+  adblockAdGuard: true,
   adblockAdAway: false,
   adblockCustomLists: [],
   fingerprintBlock: true,
@@ -4826,6 +4828,8 @@ function settingsPageSearch() {
 
 const ADBLOCK_LISTS = {
   adblockStevenBlack: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts',
+  adblockPeterLowe: 'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext',
+  adblockAdGuard: 'https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_ads_justdomains.txt',
   adblockAdAway: 'https://adaway.org/hosts.txt'
 };
 
@@ -4864,8 +4868,16 @@ async function updateAdBlockFilters(button) {
   }
   if (label) label.textContent = 'Updating filters…';
   try {
-    await callPlugin('updateAdBlockLists', { urls });
-    toast('Filters Updated');
+    const result = await callPlugin('updateAdBlockLists', { urls });
+    const failed = (result && result.failed) || [];
+    const hosts = (result && result.hosts) || 0;
+    if (!failed.length) {
+      toast('Filters updated · ' + hosts.toLocaleString() + ' hosts');
+    } else if (failed.length === urls.length) {
+      toast('Could not download the filter lists');
+    } else {
+      toast('Updated, but ' + failed.length + (failed.length === 1 ? ' list' : ' lists') + ' failed to download');
+    }
   } catch (error) {
     toast('Could not update filters');
   } finally {
@@ -4888,6 +4900,8 @@ function settingsPagePrivacy() {
     `) +
     settingSection('AdBlock Filter Lists', `
       ${settingRowToggle('adblockStevenBlack', 'StevenBlack Unified', 'Ads, trackers and malware hosts')}
+      ${settingRowToggle('adblockPeterLowe', "Peter Lowe's List", 'Curated ad and tracking servers')}
+      ${settingRowToggle('adblockAdGuard', 'AdGuard DNS Filter', 'Disguised ads and CNAME trackers')}
       ${settingRowToggle('adblockAdAway', 'AdAway', 'Community-maintained host list')}
       ${adblockCustomRows()}
       <div class="setting-row">

@@ -558,8 +558,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
         getBridge().execute(() -> {
             int hosts = manager.updateLists(urls);
+            JSArray failed = new JSArray();
+            for (String url : manager.getFailedListUrls()) failed.put(url);
             JSObject data = new JSObject();
             data.put("hosts", hosts);
+            data.put("failed", failed);
             notifyListeners("adblockUpdated", data);
             call.resolve(data);
         });

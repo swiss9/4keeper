@@ -11,6 +11,8 @@ import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -30,9 +32,17 @@ public class AdBlockManager {
     private static final int READ_TIMEOUT_MS = 20000;
     private static final String USER_AGENT = "Mozilla/5.0 (Linux; Android 14) 4Keeper/1.0";
 
+    /** Plain-domain or hosts lists only; EasyList-style rules are reduced to domains. */
+    public static final List<String> DEFAULT_LIST_URLS = Collections.unmodifiableList(Arrays.asList(
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+        "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_ads_justdomains.txt"
+    ));
+
     private final File hostsFile;
     private final HashSet<String> blockedHosts = new HashSet<>();
     private final List<String> enabledListUrls = new ArrayList<>();
+    private final List<String> failedListUrls = new ArrayList<>();
     private boolean loaded = false;
 
     public AdBlockManager(File directory) {
@@ -63,6 +73,11 @@ public class AdBlockManager {
         return new ArrayList<>(enabledListUrls);
     }
 
+    /** Lists that failed to download or produced no domains during the last update. */
+    public synchronized List<String> getFailedListUrls() {
+        return new ArrayList<>(failedListUrls);
+    }
+
     /** True for the host and any parent domain listed in a hosts file. */
     public synchronized boolean isBlocked(String host) {
         if (host == null) return false;
@@ -89,16 +104,25 @@ public class AdBlockManager {
                 if (url != null && !url.trim().isEmpty()) targets.add(url.trim());
             }
         }
+        if (targets.isEmpty()) targets.addAll(DEFAULT_LIST_URLS);
         synchronized (this) {
             enabledListUrls.clear();
             enabledListUrls.addAll(targets);
         }
         HashSet<String> fresh = new HashSet<>();
+        List<String> failed = new ArrayList<>();
         for (String url : targets) {
             try {
-                fresh.addAll(download(url));
-            } catch (Exception ignored) {
+                HashSet<String> fromList = download(url);
+                if (fromList.isEmpty()) failed.add(url);
+                else fresh.addAll(fromList);
+            } catch (Exception error) {
+                failed.add(url);
             }
+        }
+        synchronized (this) {
+            failedListUrls.clear();
+            failedListUrls.addAll(failed);
         }
         if (fresh.isEmpty()) return size();
         synchronized (this) {
@@ -134,12 +158,21 @@ public class AdBlockManager {
         }
     }
 
-    /* Accepts both hosts syntax ("0.0.0.0 ads.example.com") and plain domain
-     * lists, and rejects comments, IPs and local-only names. */
+    /* Accepts hosts syntax ("0.0.0.0 ads.example.com"), plain domain lists and
+     * AdBlock domain rules ("||ads.example.com^"), and rejects comments, cosmetic
+     * rules, exception rules, IPs and local-only names. */
     private static String normalize(String line) {
         if (line == null) return null;
         String text = line.trim();
         if (text.isEmpty() || text.startsWith("#") || text.startsWith("!")) return null;
+        /* Cosmetic (##, #@#) and exception (@@) rules are not domains; drop the
+         * whole line before the '#' comment strip below eats their domain. */
+        if (text.contains("##") || text.contains("#@#") || text.contains("@@")) return null;
+        if (text.startsWith("||")) {
+            text = text.substring(2);
+            int caret = text.indexOf('^');
+            if (caret >= 0) text = text.substring(0, caret);
+        }
         int comment = text.indexOf('#');
         if (comment >= 0) text = text.substring(0, comment).trim();
         String[] parts = text.split("\\s+");
@@ -155,8 +188,10 @@ public class AdBlockManager {
             host = parts[0];
         }
         host = host.toLowerCase(Locale.US);
+        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
         if (host.isEmpty() || host.indexOf('.') < 0) return null;
-        if (host.contains("/") || host.contains(":") || host.contains("*")) return null;
+        if (host.contains("/") || host.contains(":") || host.contains("*")
+            || host.contains("^") || host.contains("$")) return null;
         if (host.equals("localhost") || host.endsWith(".local") || host.endsWith(".localhost")) return null;
         if (host.matches("[0-9.]+")) return null;
         return host;

@@ -2011,6 +2011,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
                     }
                 }
             } else {
+                /* A page that finished loading while the sniffer was off has no
+                 * button yet, so install the script before pushing the list. */
+                Tab tab = getActiveTab();
+                if (tab != null) {
+                    try {
+                        tab.view.evaluateJavascript(SNIFFER_JS, null);
+                    } catch (Exception ignored) {
+                    }
+                }
                 pushSniffer(activeTabId);
             }
             call.resolve();

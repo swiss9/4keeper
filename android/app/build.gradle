@@ -22,6 +22,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    packaging {
+        /* yt-dlp unzips its bundled python and ffmpeg from the native lib dir,
+         * so they have to be real extracted files rather than page-aligned .so. */
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 repositories {
@@ -45,6 +52,8 @@ dependencies {
     implementation "androidx.media3:media3-transformer:1.4.1"
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0'
+    implementation 'io.github.junkfood02.youtubedl-android:library:0.17.2'
+    implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2'
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

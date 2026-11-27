@@ -70,8 +70,15 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import com.yausername.ffmpeg.FFmpeg;
+import com.yausername.youtubedl_android.YoutubeDL;
+import com.yausername.youtubedl_android.YoutubeDLRequest;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import kotlin.Unit;
+import kotlin.jvm.functions.Function3;
 
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -298,6 +305,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "for(var i=0;i<v.length;i++){var s=v[i].currentSrc||v[i].src||'';"
             + "if(s&&(s===u||v[i].getAttribute('src')===u))return v[i].poster||'';}"
             + "return '';}"
+            /* yt-dlp handles the sites that build their media inside their own
+             * player, where nothing downloadable can be sniffed. */
+            + "function isYtdlp(u){try{var h=new URL(u).hostname.toLowerCase();"
+            + "return /(^|\\.)(youtube\\.com|youtu\\.be|twitter\\.com|x\\.com|instagram\\.com|tiktok\\.com)$/.test(h);}"
+            + "catch(e){return false;}}"
             + "function row(item){"
             + "var r=d.createElement('div');"
             + "r.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 4px;border-top:1px solid #1f1f22';"
@@ -311,11 +323,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "else{thumb.textContent=item.kind==='audio'?'AUD':'VID';}"
             + "var meta=d.createElement('div');"
             + "meta.style.cssText='flex:1 1 auto;min-width:0';"
+            + "var isPage=item.kind==='page';"
             + "var name=d.createElement('div');"
-            + "name.textContent=nameOf(item.url);"
+            + "name.textContent=isPage?'This page':nameOf(item.url);"
             + "name.style.cssText='font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';"
             + "var sub=d.createElement('div');"
-            + "sub.textContent=qualityOf(item.url,item.kind)+' \\u00b7 '+(item.kind==='audio'?'Audio':'Video');"
+            + "sub.textContent=isPage?'Full page \\u00b7 yt-dlp':qualityOf(item.url,item.kind)+' \\u00b7 '+(item.kind==='audio'?'Audio':'Video');"
             + "sub.style.cssText='font-size:11px;color:#a1a1aa;margin-top:2px';"
             + "meta.appendChild(name);meta.appendChild(sub);"
             + "var acts=d.createElement('div');"
@@ -334,12 +347,24 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "dl.onclick=function(e){e.stopPropagation();closeSheet();"
             + "try{if(isHls)window.FourKeeperHost.downloadHls(item.url,tk);"
             + "else window.FourKeeperHost.downloadMedia(item.url,item.kind||'video',tk);}catch(err){}};"
-            + "acts.appendChild(play);acts.appendChild(dl);"
+            + "if(!isPage)acts.appendChild(play);"
+            + "if(!isPage)acts.appendChild(dl);"
+            + "if(isPage||isYtdlp(item.url)){"
+            + "var yt=d.createElement('button');"
+            + "yt.type='button';yt.textContent='Download via yt-dlp';"
+            + "yt.style.cssText='border:1px solid #3f3f46;border-radius:9px;background:transparent;"
+            + "color:#fafafa;font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer;white-space:nowrap';"
+            + "yt.onclick=function(e){e.stopPropagation();closeSheet();"
+            + "try{window.FourKeeperHost.downloadYtdlp(item.url,tk);}catch(err){}};"
+            + "acts.appendChild(yt);}"
             + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
             + "return r;}"
             + "function render(){"
             + "clear(list);"
-            + "if(!items.length){fab.style.display='none';closeSheet();return;}"
+            + "var page=isYtdlp(location.href);"
+            + "if(page)list.appendChild(row({url:location.href,kind:'page'}));"
+            + "if(!items.length){if(!page){fab.style.display='none';closeSheet();return;}"
+            + "badge.textContent='1';fab.style.display='flex';return;}"
             + "badge.textContent=String(items.length);"
             + "fab.style.display='flex';"
             + "for(var i=0;i<items.length;i++)list.appendChild(row(items[i]));}"
@@ -657,6 +682,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     private SharedPreferences prefs;
     private ExecutorService downloadExecutor;
+    /* yt-dlp jobs run one at a time: the finished file is identified by its
+     * timestamp in the shared download folder. */
+    private ExecutorService ytdlpExecutor;
+    private boolean ytdlpReady;
     /* Size probes for the download prompt: a slow server must never delay a
      * page or hold one of the download workers, so they get their own thread. */
     private ExecutorService probeExecutor;
@@ -731,6 +760,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         downloadExecutor = Executors.newFixedThreadPool(4);
         probeExecutor = Executors.newSingleThreadExecutor();
+        ytdlpExecutor = Executors.newSingleThreadExecutor();
+        /* Unpacking python and ffmpeg takes seconds on first launch, so it runs
+         * once on the yt-dlp thread instead of delaying the bridge. */
+        ytdlpExecutor.execute(() -> {
+            try {
+                ensureYtdlp();
+            } catch (Exception ignored) {
+            }
+        });
         downloadStateFile = new File(getContext().getFilesDir(), "paused_downloads.json");
         registerDownloadWatcher();
         registerCreateDocumentLauncher();
@@ -1083,6 +1121,19 @@ public class EmbeddedWebViewPlugin extends Plugin {
             if (activity == null) return;
             final String target = url;
             activity.runOnUiThread(() -> startHlsDownload(target, "", tabId));
+        }
+
+        /* YouTube and the short-video networks assemble their streams inside
+         * their own player, so nothing usable is sniffed from the page: yt-dlp
+         * extracts the real formats and merges them. */
+        @JavascriptInterface
+        public void downloadYtdlp(String url, String token) {
+            if (!secretToken.equals(token)) return;
+            if (url == null || url.isEmpty()) return;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            final String target = url;
+            activity.runOnUiThread(() -> startYtdlpDownload(target, tabId));
         }
 
         @JavascriptInterface
@@ -2802,7 +2853,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
-    private void updateCustomRecord(long id, String status, long bytes, long total) {
+    /* `file` is the finished output when the job picked its own name (yt-dlp),
+     * so the row can show and open what was actually written. */
+    private void updateCustomRecord(long id, String status, long bytes, long total, File file) {
         synchronized (downloadRecordLock) {
             JSONArray records = readDownloadRecords();
             for (int i = 0; i < records.length(); i++) {
@@ -2812,6 +2865,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
                     record.put("status", status);
                     record.put("bytes", bytes);
                     record.put("totalBytes", total);
+                    if (file != null) {
+                        record.put("filename", file.getName());
+                        record.put("uri", Uri.fromFile(file).toString());
+                    }
                 } catch (Exception ignored) {
                 }
             }
@@ -3181,7 +3238,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 public void onCompleted(Composition composition, ExportResult result) {
                     handler.removeCallbacks(poll);
                     long size = result != null && result.fileSizeBytes > 0 ? result.fileSizeBytes : target.length();
-                    updateCustomRecord(id, "successful", size, size);
+                    updateCustomRecord(id, "successful", size, size, null);
                     notifyDownloadProgress(id, size, size, "successful");
                     JSObject finished = new JSObject();
                     finished.put("id", id);
@@ -3197,7 +3254,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                         target.delete();
                     } catch (Exception ignored) {
                     }
-                    updateCustomRecord(id, "failed", 0, 0);
+                    updateCustomRecord(id, "failed", 0, 0, null);
                     notifyDownloadProgress(id, 0, 0, "failed");
                     String detail = error == null || error.getMessage() == null ? "unknown error" : error.getMessage();
                     toast("HLS merge failed: " + detail);
@@ -3208,6 +3265,146 @@ public class EmbeddedWebViewPlugin extends Plugin {
         running[0] = transformer;
         handler.post(poll);
         transformer.start(composition, target.getAbsolutePath());
+    }
+
+    /** Unpacks the bundled python and ffmpeg once; safe from any thread. */
+    private synchronized void ensureYtdlp() throws Exception {
+        if (ytdlpReady) return;
+        YoutubeDL.getInstance().init(getContext());
+        FFmpeg.getInstance().init(getContext());
+        ytdlpReady = true;
+    }
+
+    /**
+     * Downloads a page with yt-dlp. Sites like YouTube, X, Instagram and TikTok
+     * build their media inside their own player, so there is no stream URL to
+     * sniff: yt-dlp picks the best video+audio pair and ffmpeg merges them.
+     */
+    private void startYtdlpDownload(String url, int sourceTabId) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            toast("Only http(s) pages can be downloaded.");
+            return;
+        }
+        ExecutorService executor = ytdlpExecutor;
+        if (executor == null) {
+            toast("The downloader is not ready yet.");
+            return;
+        }
+        File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
+        if (!dir.exists() && !dir.mkdirs()) {
+            toast("Could not create the download folder.");
+            return;
+        }
+        String host = Uri.parse(url).getHost();
+        if (host == null || host.isEmpty()) host = "Video";
+        if (host.startsWith("www.")) host = host.substring(4);
+        final String label = host + " video";
+        final File folder = dir;
+        final long id = System.currentTimeMillis() * 1000L + (long) (Math.random() * 1000);
+        /* yt-dlp names the file after the video title, which is only known once
+         * it starts, so the row adopts the file the run produced. */
+        final long startedAt = System.currentTimeMillis() - 2000L;
+
+        try {
+            JSONObject record = new JSONObject();
+            record.put("id", id);
+            record.put("filename", label);
+            record.put("url", url);
+            record.put("mime", "video/mp4");
+            record.put("timestamp", System.currentTimeMillis());
+            record.put("tabId", sourceTabId);
+            record.put("custom", true);
+            record.put("status", "running");
+            record.put("bytes", 0);
+            record.put("totalBytes", 0);
+            record.put("connections", 1);
+            addDownloadRecord(record);
+        } catch (Exception error) {
+            toast("Could not start the yt-dlp download.");
+            return;
+        }
+
+        JSObject started = new JSObject();
+        started.put("id", id);
+        started.put("filename", label);
+        started.put("url", url);
+        started.put("tabId", sourceTabId);
+        notifyListeners("downloadStarted", started);
+        toast("Downloading with yt-dlp…");
+
+        executor.execute(() -> {
+            File output;
+            try {
+                ensureYtdlp();
+                YoutubeDLRequest request = new YoutubeDLRequest(url);
+                request.addOption("-f", "bestvideo+bestaudio/best");
+                request.addOption("-o", new File(folder, "%(title)s.%(ext)s").getAbsolutePath());
+                /* One tap on a watch page must not queue its whole playlist. */
+                request.addOption("--no-playlist");
+                YoutubeDL.getInstance().execute(request, null, new Function3<Float, Long, String, Unit>() {
+                    private int lastPercent = -1;
+
+                    @Override
+                    public Unit invoke(Float progress, Long etaSeconds, String line) {
+                        int percent = progress == null ? 0 : Math.round(progress);
+                        if (percent != lastPercent) {
+                            lastPercent = percent;
+                            notifyYtdlpProgress(id, percent, etaSeconds == null ? 0L : etaSeconds);
+                        }
+                        return Unit.INSTANCE;
+                    }
+                });
+                output = newestDownloadFile(folder, startedAt);
+            } catch (Exception error) {
+                String detail = error.getMessage() == null ? "unknown error" : error.getMessage();
+                updateCustomRecord(id, "failed", 0, 0, null);
+                notifyDownloadProgress(id, 0, 0, "failed");
+                toast("yt-dlp failed: " + detail);
+                return;
+            }
+            if (output == null) {
+                updateCustomRecord(id, "failed", 0, 0, null);
+                notifyDownloadProgress(id, 0, 0, "failed");
+                toast("yt-dlp finished but wrote no file.");
+                return;
+            }
+            long size = output.length();
+            updateCustomRecord(id, "successful", size, size, output);
+            notifyDownloadProgress(id, size, size, "successful");
+            JSObject finished = new JSObject();
+            finished.put("id", id);
+            finished.put("tabId", sourceTabId);
+            notifyListeners("downloadFinished", finished);
+            if (downloadNotifications) toast("Downloaded " + output.getName());
+        });
+    }
+
+    /* The run's output is the newest file in the folder that is not a part
+     * file. shortcut: another download finishing in the same second could be
+     * picked instead, which needs per-job output folders to rule out. */
+    private File newestDownloadFile(File dir, long since) {
+        File[] files = dir.listFiles();
+        File newest = null;
+        if (files == null) return null;
+        for (File file : files) {
+            if (!file.isFile() || file.getName().endsWith(".part")) continue;
+            if (file.lastModified() < since) continue;
+            if (newest == null || file.lastModified() >= newest.lastModified()) newest = file;
+        }
+        return newest;
+    }
+
+    private void notifyYtdlpProgress(long id, int percent, long etaSeconds) {
+        Activity activity = getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            JSObject data = new JSObject();
+            data.put("id", id);
+            data.put("progress", percent / 100f);
+            data.put("eta", etaSeconds);
+            notifyListeners("ytdlpProgress", data);
+        });
     }
 
     /**
@@ -3966,6 +4163,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (probeExecutor != null) {
             probeExecutor.shutdownNow();
             probeExecutor = null;
+        }
+        if (ytdlpExecutor != null) {
+            ytdlpExecutor.shutdownNow();
+            ytdlpExecutor = null;
         }
         for (Integer id : new ArrayList<>(tabs.keySet())) {
             destroyTab(tabs.remove(id));

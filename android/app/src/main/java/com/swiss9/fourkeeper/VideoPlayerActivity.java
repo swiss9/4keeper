@@ -2,11 +2,15 @@ package com.swiss9.fourkeeper;
 
 import android.app.Activity;
 import android.app.PictureInPictureParams;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.util.Rational;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -15,8 +19,6 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.media3.common.AudioAttributes;
-import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
@@ -26,9 +28,10 @@ import androidx.media3.ui.PlayerView;
 /**
  * Full-screen ExoPlayer surface opened from the in-page media sniffer.
  *
- * <p>Entering picture-in-picture is automatic: Home (or the PiP gesture) shrinks
- * the player instead of stopping playback. The player is released only in
- * {@link #onDestroy()}, which PiP never triggers.</p>
+ * <p>The player itself lives in {@link MediaPlaybackService}: this activity binds
+ * to it and attaches its {@link PlayerView}, so the audio keeps going when the
+ * window is destroyed or the app is minimized. Entering picture-in-picture is
+ * still automatic.</p>
  */
 public class VideoPlayerActivity extends Activity {
 
@@ -41,6 +44,28 @@ public class VideoPlayerActivity extends Activity {
     private PlayerView playerView;
     private FrameLayout root;
     private boolean pipOnStart;
+    private boolean bound;
+    private String mediaUrl;
+
+    private final Player.Listener errorListener = new Player.Listener() {
+        @Override
+        public void onPlayerError(PlaybackException error) {
+            showError();
+        }
+    };
+
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            bound = true;
+            attach(((MediaPlaybackService.LocalBinder) binder).getService().getPlayer());
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            bound = false;
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,38 +88,39 @@ public class VideoPlayerActivity extends Activity {
             finish();
             return;
         }
+        mediaUrl = url;
         pipOnStart = intent.getBooleanExtra(EXTRA_PIP, false);
 
-        player = new ExoPlayer.Builder(this).build();
-        player.setAudioAttributes(
-            new AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                .build(),
-            true
-        );
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onPlayerError(PlaybackException error) {
-                showError();
-            }
-        });
-        playerView.setPlayer(player);
-        player.setMediaItem(MediaItem.fromUri(url));
-        player.prepare();
-        player.setPlayWhenReady(true);
+        /* The player belongs to the service, so the service is what keeps the
+         * audio alive; this activity only attaches to it. */
+        MediaPlaybackService.start(this);
+        try {
+            bindService(new Intent(this, MediaPlaybackService.class), connection,
+                Context.BIND_AUTO_CREATE);
+        } catch (Exception ignored) {
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             updatePipParams(false);
         }
-        /* Keeps the process alive and the session published once the user
-         * leaves the app, so the audio does not stop with the window. */
-        MediaPlaybackService.start(this, player);
     }
 
-    /* Play in the sniffer asks for the floating window, so the player enters PiP
-     * as soon as it is resumed: the page stays underneath and the video floats
-     * over it. Tapping the window expands it to full screen. */
+    /* Attaches the service-owned player. Re-attaching to the same media keeps
+     * its position instead of restarting the video. */
+    private void attach(ExoPlayer servicePlayer) {
+        if (servicePlayer == null || isFinishing() || isDestroyed()) return;
+        player = servicePlayer;
+        playerView.setPlayer(player);
+        player.addListener(errorListener);
+        MediaItem current = player.getCurrentMediaItem();
+        if (current == null || !mediaUrl.equals(current.mediaId)) {
+            player.stop();
+            player.setMediaItem(MediaItem.fromUri(mediaUrl));
+            player.prepare();
+        }
+        player.setPlayWhenReady(true);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -182,15 +208,27 @@ public class VideoPlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
-        MediaPlaybackService.stop(this);
+        /* Detach the surface but never release the player here: the service
+         * owns it and keeps playing. */
         if (player != null) {
-            player.release();
+            player.removeListener(errorListener);
             player = null;
         }
         if (playerView != null) {
             playerView.setPlayer(null);
-            playerView = null;
         }
+        if (bound) {
+            try {
+                unbindService(connection);
+            } catch (Exception ignored) {
+            }
+            bound = false;
+        }
+        /* Closed by the user: stop. Destroyed by the system while the app went
+         * to the background: leave the service playing. */
+        if (isFinishing()) {
+            MediaPlaybackService.stop(this);
+        }
+        super.onDestroy();
     }
 }

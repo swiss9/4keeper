@@ -1,6 +1,5 @@
 package com.swiss9.fourkeeper;
 
-import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,48 +8,89 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
 
 import androidx.core.app.NotificationCompat;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
 import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 
 /**
- * Foreground service that keeps the playing video's process alive and its
- * MediaSession published, so audio keeps going when the user switches apps.
+ * Owns the ExoPlayer that {@link VideoPlayerActivity} displays and keeps it
+ * running in the foreground, so audio continues after the activity is destroyed
+ * or the app is minimized.
  *
- * <p>The player stays owned by {@link VideoPlayerActivity}: the service only
- * wraps it in a session and holds a reference while playback runs. The activity
- * releases the session and the player on the way out, in that order.</p>
+ * <p>The player belongs to this service: an activity binds, calls
+ * {@link #getPlayer()} and attaches its surface. Releasing the window therefore
+ * no longer stops playback, and the MediaSession stays published.</p>
  */
 public class MediaPlaybackService extends Service {
+
+    /** Notification action: stops playback and drops the notification. */
+    public static final String ACTION_STOP = "com.swiss9.fourkeeper.STOP_PLAYBACK";
 
     private static final String CHANNEL_ID = "media_playback";
     private static final int NOTIFICATION_ID = 4104;
 
-    /** Set before startService(); cleared by {@link #stop(Context)}. */
-    private static Player sharedPlayer;
-
+    private final LocalBinder binder = new LocalBinder();
+    private ExoPlayer player;
     private MediaSession session;
 
-    /** Starts or refreshes the foreground service for a player that is playing. */
-    public static void start(Activity activity, Player player) {
-        sharedPlayer = player;
-        Intent intent = new Intent(activity, MediaPlaybackService.class);
+    /** Hands a bound activity the service, and with it the player. */
+    public class LocalBinder extends Binder {
+        public MediaPlaybackService getService() {
+            return MediaPlaybackService.this;
+        }
+    }
+
+    /** The single player this service owns, created on first use. */
+    public ExoPlayer getPlayer() {
+        if (player == null) {
+            /* Application context: the player must not hold the activity that
+             * happened to start it. */
+            player = new ExoPlayer.Builder(getApplicationContext()).build();
+            player.setAudioAttributes(
+                new AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            );
+            player.addListener(new Player.Listener() {
+                @Override
+                public void onPlaybackStateChanged(int state) {
+                    /* Nothing left to play: drop the notification. The player
+                     * itself is released in onDestroy(), which only runs once
+                     * no activity is bound to it. */
+                    if (state == Player.STATE_ENDED) {
+                        stopForegroundNow();
+                        stopSelf();
+                    }
+                }
+            });
+        }
+        return player;
+    }
+
+    /** Starts or refreshes the foreground service. */
+    public static void start(Context context) {
+        Intent intent = new Intent(context, MediaPlaybackService.class);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                activity.startForegroundService(intent);
+                context.startForegroundService(intent);
             } else {
-                activity.startService(intent);
+                context.startService(intent);
             }
         } catch (Exception ignored) {
         }
     }
 
-    /** Drops the session and the notification when playback is over. */
+    /** Drops the session, the player and the notification when playback is over. */
     public static void stop(Context context) {
-        sharedPlayer = null;
         try {
             context.stopService(new Intent(context, MediaPlaybackService.class));
         } catch (Exception ignored) {
@@ -59,18 +99,16 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Player player = sharedPlayer;
-        if (player == null) {
-            /* A system restart has no player to attach to, but the service was
-             * started with startForegroundService and must go foreground once
-             * or the process is killed. */
-            goForeground();
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            if (player != null) player.pause();
+            stopForegroundNow();
             stopSelf();
             return START_NOT_STICKY;
         }
+        ExoPlayer active = getPlayer();
         if (session == null) {
             try {
-                session = new MediaSession.Builder(this, player)
+                session = new MediaSession.Builder(this, active)
                     .setSessionActivity(openApp())
                     .build();
             } catch (Exception ignored) {
@@ -83,6 +121,11 @@ public class MediaPlaybackService extends Service {
     }
 
     @Override
+    public IBinder onBind(Intent intent) {
+        return binder;
+    }
+
+    @Override
     public void onDestroy() {
         if (session != null) {
             try {
@@ -91,12 +134,21 @@ public class MediaPlaybackService extends Service {
             }
             session = null;
         }
+        if (player != null) {
+            try {
+                player.release();
+            } catch (Exception ignored) {
+            }
+            player = null;
+        }
         super.onDestroy();
     }
 
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
+    private void stopForegroundNow() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } catch (Exception ignored) {
+        }
     }
 
     private void goForeground() {
@@ -125,6 +177,9 @@ public class MediaPlaybackService extends Service {
             .setContentTitle("Playing")
             .setContentText("4Keeper is playing media")
             .setContentIntent(openApp())
+            /* Without this the player can keep audio going with no way to stop
+             * it once the video window is gone. */
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPlayback())
             .setOngoing(true)
             .setSilent(true)
             .build();
@@ -137,5 +192,13 @@ public class MediaPlaybackService extends Service {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
         return PendingIntent.getActivity(this, 0, intent, flags);
+    }
+
+    private PendingIntent stopPlayback() {
+        Intent intent = new Intent(this, MediaPlaybackService.class);
+        intent.setAction(ACTION_STOP);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getService(this, 1, intent, flags);
     }
 }

@@ -73,6 +73,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.yausername.ffmpeg.FFmpeg;
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
+import com.yausername.youtubedl_android.YoutubeDLResponse;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -3346,7 +3347,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 request.addOption("-o", new File(folder, "%(title)s.%(ext)s").getAbsolutePath());
                 /* One tap on a watch page must not queue its whole playlist. */
                 request.addOption("--no-playlist");
-                YoutubeDL.getInstance().execute(request, null, new Function3<Float, Long, String, Unit>() {
+                /* --print implies --quiet and --simulate: --no-simulate keeps the
+                 * download and --progress keeps the percentage lines the row needs. */
+                request.addOption("--no-simulate");
+                request.addOption("--progress");
+                request.addOption("--print", "after_move:filepath");
+                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request, null, new Function3<Float, Long, String, Unit>() {
                     private int lastPercent = -1;
 
                     @Override
@@ -3359,8 +3365,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
                         return Unit.INSTANCE;
                     }
                 });
-                output = newestDownloadFile(folder, startedAt);
+                output = printedDownloadFile(response.getOut());
+                if (output == null) output = newestDownloadFile(folder, startedAt);
             } catch (Exception error) {
+                cleanYtdlpTemp(folder);
                 String detail = error.getMessage() == null ? "unknown error" : error.getMessage();
                 updateCustomRecord(id, "failed", 0, 0, null);
                 notifyDownloadProgress(id, 0, 0, "failed");
@@ -3368,6 +3376,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 return;
             }
             if (output == null) {
+                cleanYtdlpTemp(folder);
                 updateCustomRecord(id, "failed", 0, 0, null);
                 notifyDownloadProgress(id, 0, 0, "failed");
                 toast("yt-dlp finished but wrote no file.");
@@ -3384,15 +3393,38 @@ public class EmbeddedWebViewPlugin extends Plugin {
         });
     }
 
-    /* The run's output is the newest file in the folder that is not a part
-     * file. shortcut: another download finishing in the same second could be
-     * picked instead, which needs per-job output folders to rule out. */
+    /* --print after_move:filepath prints the finished path on its own line, so
+     * the last line naming an existing file is the merged output. */
+    private File printedDownloadFile(String out) {
+        if (out == null) return null;
+        String[] lines = out.split("\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            File file = new File(lines[i].trim());
+            if (file.isAbsolute() && file.isFile()) return file;
+        }
+        return null;
+    }
+
+    /* A failed or interrupted run leaves .part fragments and the .ytdl resume
+     * marker behind; nothing in this app can use them again. */
+    private void cleanYtdlpTemp(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (name.endsWith(".ytdl") || name.contains(".part")) file.delete();
+        }
+    }
+
+    /* Fallback when the printed path is missing: the newest file in the folder
+     * that is not a part file. shortcut: another download finishing in the same
+     * second could be picked instead, which needs per-job output folders. */
     private File newestDownloadFile(File dir, long since) {
         File[] files = dir.listFiles();
         File newest = null;
         if (files == null) return null;
         for (File file : files) {
-            if (!file.isFile() || file.getName().endsWith(".part")) continue;
+            if (!file.isFile() || file.getName().contains(".part")) continue;
             if (file.lastModified() < since) continue;
             if (newest == null || file.lastModified() >= newest.lastModified()) newest = file;
         }

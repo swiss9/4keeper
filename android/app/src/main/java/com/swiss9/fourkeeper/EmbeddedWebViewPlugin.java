@@ -21,6 +21,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
@@ -47,6 +49,14 @@ import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.FileProvider;
+import androidx.media3.common.MediaItem;
+import androidx.media3.transformer.Composition;
+import androidx.media3.transformer.EditedMediaItem;
+import androidx.media3.transformer.EditedMediaItemSequence;
+import androidx.media3.transformer.ExportException;
+import androidx.media3.transformer.ExportResult;
+import androidx.media3.transformer.ProgressHolder;
+import androidx.media3.transformer.Transformer;
 import androidx.webkit.ScriptHandler;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
@@ -316,12 +326,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "font:600 11px system-ui,sans-serif;padding:6px 10px;cursor:pointer';"
             + "play.onclick=function(e){e.stopPropagation();closeSheet();"
             + "try{window.FourKeeperHost.playMedia(item.url,item.kind||'video',tk);}catch(err){}};"
+            + "var isHls=item.kind==='hls';"
             + "var dl=d.createElement('button');"
-            + "dl.type='button';dl.textContent='Download';"
+            + "dl.type='button';dl.textContent=isHls?'Download Video (HLS)':'Download';"
             + "dl.style.cssText='border:0;border-radius:9px;background:#fafafa;color:#09090b;"
-            + "font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer';"
+            + "font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer;white-space:nowrap';"
             + "dl.onclick=function(e){e.stopPropagation();closeSheet();"
-            + "try{window.FourKeeperHost.downloadMedia(item.url,item.kind||'video',tk);}catch(err){}};"
+            + "try{if(isHls)window.FourKeeperHost.downloadHls(item.url,tk);"
+            + "else window.FourKeeperHost.downloadMedia(item.url,item.kind||'video',tk);}catch(err){}};"
             + "acts.appendChild(play);acts.appendChild(dl);"
             + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
             + "return r;}"
@@ -1059,6 +1071,18 @@ public class EmbeddedWebViewPlugin extends Plugin {
             final String target = url;
             final String mime = mimeForMediaKind(kind, url);
             activity.runOnUiThread(() -> enqueueDownload(target, "", "", mime, tabId));
+        }
+
+        /* An HLS playlist is a text index, so the plain downloader would only
+         * save a few KB of it. The segments are fetched and muxed natively. */
+        @JavascriptInterface
+        public void downloadHls(String url, String token) {
+            if (!secretToken.equals(token)) return;
+            if (url == null || url.isEmpty()) return;
+            Activity activity = getActivity();
+            if (activity == null) return;
+            final String target = url;
+            activity.runOnUiThread(() -> startHlsDownload(target, "", tabId));
         }
 
         @JavascriptInterface
@@ -2137,6 +2161,28 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     /**
+     * Merges an HLS stream into one MP4 with media3 Transformer. The playlist is
+     * fetched, the segments are pulled through ExoPlayer and the muxer writes a
+     * single file, so the list ends up with a real video instead of a 7 KB
+     * playlist. Runs on the UI thread because Transformer needs a Looper.
+     */
+    @PluginMethod
+    public void downloadHls(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url == null || url.trim().isEmpty()) {
+            call.reject("An HLS URL is required.");
+            return;
+        }
+        String filename = call.getString("filename", "");
+        Integer tabId = call.getInt("tabId");
+        int sourceTabId = (tabId != null && tabId >= 0) ? tabId : activeTabId;
+        final String targetUrl = url.trim();
+        final String targetName = filename == null ? "" : filename;
+        getActivity().runOnUiThread(() -> startHlsDownload(targetUrl, targetName, sourceTabId));
+        call.resolve();
+    }
+
+    /**
      * Starts a download the user confirmed in the download prompt. The filename
      * the prompt showed is passed through as a Content-Disposition header so
      * URLUtil keeps it instead of re-guessing a different name.
@@ -3051,6 +3097,117 @@ public class EmbeddedWebViewPlugin extends Plugin {
             case "webp": return "image/webp";
             default: return "application/octet-stream";
         }
+    }
+
+    private static final long HLS_PROGRESS_INTERVAL_MS = 600;
+
+    private void startHlsDownload(String url, String requestedName, int sourceTabId) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            toast("Only http(s) streams can be merged.");
+            return;
+        }
+        File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
+        if (!dir.exists() && !dir.mkdirs()) {
+            toast("Could not create the download folder.");
+            return;
+        }
+        String filename = requestedName == null ? "" : requestedName.trim();
+        if (filename.isEmpty()) filename = android.webkit.URLUtil.guessFileName(url, null, "video/mp4");
+        if (!filename.toLowerCase().endsWith(".mp4")) {
+            int dot = filename.lastIndexOf('.');
+            filename = (dot > 0 ? filename.substring(0, dot) : filename) + ".mp4";
+        }
+        File target = uniqueDownloadFile(dir, filename);
+        final String name = target.getName();
+        final long id = System.currentTimeMillis() * 1000L + (long) (Math.random() * 1000);
+
+        try {
+            JSONObject record = new JSONObject();
+            record.put("id", id);
+            record.put("filename", name);
+            record.put("url", url);
+            record.put("mime", "video/mp4");
+            record.put("timestamp", System.currentTimeMillis());
+            record.put("tabId", sourceTabId);
+            record.put("custom", true);
+            record.put("status", "running");
+            record.put("bytes", 0);
+            record.put("totalBytes", 0);
+            record.put("connections", 1);
+            record.put("uri", Uri.fromFile(target).toString());
+            addDownloadRecord(record);
+        } catch (Exception error) {
+            toast("Could not start the HLS download.");
+            return;
+        }
+
+        JSObject started = new JSObject();
+        started.put("id", id);
+        started.put("filename", name);
+        started.put("url", url);
+        started.put("tabId", sourceTabId);
+        notifyListeners("downloadStarted", started);
+        toast("Merging HLS into MP4…");
+
+        /* No forced transmux: Transformer copies the stream when the codecs fit
+         * the MP4 muxer (the normal HLS case) and only re-encodes exotic ones. */
+        EditedMediaItem item = new EditedMediaItem.Builder(MediaItem.fromUri(url)).build();
+        Composition composition = new Composition.Builder(new EditedMediaItemSequence(item)).build();
+
+        final Handler handler = new Handler(Looper.getMainLooper());
+        final ProgressHolder holder = new ProgressHolder();
+        final Transformer[] running = new Transformer[1];
+
+        /* 1.4.1 has no progress callback, so the exported percentage is polled. */
+        Runnable poll = new Runnable() {
+            @Override
+            public void run() {
+                Transformer transformer = running[0];
+                if (transformer == null) return;
+                if (transformer.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) {
+                    JSObject data = new JSObject();
+                    data.put("id", id);
+                    data.put("progress", holder.progress / 100f);
+                    notifyListeners("hlsDownloadProgress", data);
+                }
+                handler.postDelayed(this, HLS_PROGRESS_INTERVAL_MS);
+            }
+        };
+
+        Transformer transformer = new Transformer.Builder(getContext())
+            .addListener(new Transformer.Listener() {
+                @Override
+                public void onCompleted(Composition composition, ExportResult result) {
+                    handler.removeCallbacks(poll);
+                    long size = result != null && result.fileSizeBytes > 0 ? result.fileSizeBytes : target.length();
+                    updateCustomRecord(id, "successful", size, size);
+                    notifyDownloadProgress(id, size, size, "successful");
+                    JSObject finished = new JSObject();
+                    finished.put("id", id);
+                    finished.put("tabId", sourceTabId);
+                    notifyListeners("downloadFinished", finished);
+                    if (downloadNotifications) toast("Downloaded " + name);
+                }
+
+                @Override
+                public void onError(Composition composition, ExportResult result, ExportException error) {
+                    handler.removeCallbacks(poll);
+                    try {
+                        target.delete();
+                    } catch (Exception ignored) {
+                    }
+                    updateCustomRecord(id, "failed", 0, 0);
+                    notifyDownloadProgress(id, 0, 0, "failed");
+                    String detail = error == null || error.getMessage() == null ? "unknown error" : error.getMessage();
+                    toast("HLS merge failed: " + detail);
+                }
+            })
+            .build();
+
+        running[0] = transformer;
+        handler.post(poll);
+        transformer.start(composition, target.getAbsolutePath());
     }
 
     /**

@@ -6097,6 +6097,25 @@ function attachNativeListeners() {
     if (dashboardActive) updateDashboardProgress(data);
   });
 
+  /* An HLS merge reports a percentage, not byte counts: the muxer only knows
+   * the final size once it finishes. */
+  listen('hlsDownloadProgress', (data) => {
+    if (!data || typeof data.id !== 'number') return;
+    const row = document.getElementById('dl-row-' + data.id);
+    if (!row) return;
+    const percent = Math.max(0, Math.min(100, Math.round((Number(data.progress) || 0) * 100)));
+    const meta = row.querySelector('[data-dl-meta]');
+    if (meta) meta.textContent = 'Merging HLS · ' + percent + '%';
+    const bar = row.querySelector('[data-dl-progress]');
+    if (bar) {
+      bar.setAttribute('aria-valuenow', String(percent));
+      const fill = bar.firstElementChild;
+      if (fill) fill.style.width = percent + '%';
+    }
+    const pct = row.querySelector('[data-dl-pct]');
+    if (pct) pct.textContent = percent + '%';
+  });
+
   listen('downloadFinished', (data) => {
     if (data && typeof data.id === 'number') {
       const item = downloadsCache.find((entry) => Number(entry.id) === data.id);

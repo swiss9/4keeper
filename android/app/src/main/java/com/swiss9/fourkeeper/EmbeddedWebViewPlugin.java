@@ -2853,6 +2853,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
+    private void updateCustomRecord(long id, String status, long bytes, long total) {
+        updateCustomRecord(id, status, bytes, total, null);
+    }
+
     /* `file` is the finished output when the job picked its own name (yt-dlp),
      * so the row can show and open what was actually written. */
     private void updateCustomRecord(long id, String status, long bytes, long total, File file) {

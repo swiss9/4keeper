@@ -3422,7 +3422,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 });
                 /* A toast vanishes, and yt-dlp explains a failure on stderr;
                  * both streams go to logcat so a silent failure is diagnosable. */
-                Log.d(TAG, "yt-dlp " + url + "\n" + response.getOut() + "\n" + response.getError());
+                Log.d(TAG, "yt-dlp exit " + response.getExitCode() + " " + url
+                    + "\n" + response.getOut() + "\n" + response.getErr());
                 output = printedDownloadFile(response.getOut());
                 if (output == null) output = newestDownloadFile(folder, startedAt);
             } catch (Exception error) {

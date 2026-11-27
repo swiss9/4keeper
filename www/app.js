@@ -91,6 +91,7 @@ const DEFAULT_SETTINGS = {
   /* Sends WebView traffic through OkHttp with the selected DoH resolver. */
   dnsOverHttps: false,
   dohProvider: 'cloudflare',
+  dohCustomUrl: '',
   safeBrowsing: true,
   cookies: 'all',
   javaScript: true,
@@ -1583,6 +1584,7 @@ function pushNativeSettings(reload) {
     doNotTrack: !!settings.doNotTrack,
     dnsOverHttps: !!settings.dnsOverHttps,
     dohProvider: settings.dohProvider || 'cloudflare',
+    dohCustomUrl: settings.dohCustomUrl || '',
     speedLimit: Number(settings.speedLimit) || 0,
     connectionsPerFile: Number(settings.connectionsPerFile) || 1,
     zoomControls: !!settings.zoomControls,
@@ -1616,6 +1618,7 @@ const NATIVE_SETTING_KEYS = [
   'doNotTrack',
   'dnsOverHttps',
   'dohProvider',
+  'dohCustomUrl',
   'speedLimit',
   'connectionsPerFile',
   'zoomControls',
@@ -2418,7 +2421,7 @@ function updateDashboardStorage() {
     /* The header shows the short free-space figure; the full breakdown stays in
      * the tooltip so the value is still available on long-press/desktop. */
     if (!storageReady) {
-      dom.dashboardStorage.textContent = 'Checking storage…';
+      dom.dashboardStorage.textContent = 'Calculating…';
       dom.dashboardStorage.removeAttribute('title');
     } else {
       const short = total > 0 ? freeSpaceLabel(free) : '';
@@ -4682,12 +4685,43 @@ const DOH_PROVIDERS = [
   { value: 'cloudflare', label: 'Cloudflare', desc: '1.1.1.1 — fastest' },
   { value: 'google', label: 'Google', desc: '8.8.8.8' },
   { value: 'quad9', label: 'Quad9', desc: '9.9.9.9 — blocks malware domains' },
-  { value: 'adguard', label: 'AdGuard', desc: '94.140.14.14 — blocks ads and trackers' }
+  { value: 'adguard', label: 'AdGuard', desc: '94.140.14.14 — blocks ads and trackers' },
+  { value: 'custom', label: 'Custom', desc: 'Your own DoH endpoint (https://…)' }
 ];
 
 function dohProviderLabel() {
+  if (settings.dohProvider === 'custom') {
+    try {
+      return settings.dohCustomUrl ? new URL(settings.dohCustomUrl).host : 'Custom';
+    } catch (error) {
+      return 'Custom';
+    }
+  }
   const found = DOH_PROVIDERS.find((item) => item.value === settings.dohProvider);
   return found ? found.label : 'Cloudflare';
+}
+
+function openCustomDohDialog() {
+  openDialog({
+    title: 'Custom DNS over HTTPS',
+    message: 'Paste the DoH endpoint. It must start with https://.',
+    body: `<input class="text-input" id="dohCustomInput" type="url" inputmode="url" autocomplete="off"
+      placeholder="https://dns.example.com/dns-query" aria-label="Custom DoH URL"
+      value="${escapeHtml(settings.dohCustomUrl || '')}">`,
+    confirmLabel: 'Save',
+    onConfirm: () => {
+      const input = document.getElementById('dohCustomInput');
+      const url = (input && input.value ? input.value : '').trim();
+      if (!/^https:\/\/[^\s/]+/i.test(url)) {
+        throw new Error('The DoH URL must start with https://');
+      }
+      updateSetting({ dohProvider: 'custom', dohCustomUrl: url }, { rerender: true, toastMessage: 'DNS provider updated' });
+    }
+  });
+  window.setTimeout(() => {
+    const input = document.getElementById('dohCustomInput');
+    if (input) input.focus();
+  }, 60);
 }
 
 /* Two separate settings trees:
@@ -4795,11 +4829,8 @@ function adblockCustomRows() {
 }
 
 async function updateAdBlockFilters(button) {
+  /* An empty selection is valid: native falls back to the list in the APK. */
   const urls = adblockListUrls();
-  if (!urls.length) {
-    toast('Enable a filter list first');
-    return;
-  }
   const label = button ? button.querySelector('.setting-label') : null;
   if (button) {
     button.disabled = true;
@@ -5045,7 +5076,13 @@ function handleSettingsAction(action) {
       ], settings.density, (value) => updateSetting({ density: value }, { rerender: true }));
       break;
     case 'dnsProvider':
-      openChoice('DNS provider', DOH_PROVIDERS, settings.dohProvider || 'cloudflare', (value) => updateSetting({ dohProvider: value }, { rerender: true, toastMessage: 'DNS provider updated' }));
+      openChoice('DNS provider', DOH_PROVIDERS, settings.dohProvider || 'cloudflare', (value) => {
+        if (value === 'custom') {
+          openCustomDohDialog();
+          return;
+        }
+        updateSetting({ dohProvider: value }, { rerender: true, toastMessage: 'DNS provider updated' });
+      });
       break;
     case 'engine':
       openChoice('Search engine', Object.entries(ENGINES).map(([value, item]) => ({

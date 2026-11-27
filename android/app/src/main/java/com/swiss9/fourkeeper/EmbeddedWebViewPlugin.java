@@ -27,6 +27,7 @@ import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
@@ -116,6 +117,7 @@ import java.util.regex.Pattern;
 @CapacitorPlugin(name = "EmbeddedWebView")
 public class EmbeddedWebViewPlugin extends Plugin {
 
+    private static final String TAG = "4Keeper";
     private static final String PREFS_NAME = "4keeper_webview";
     private static final String APP_DATA_PREFS = "4keeper_appdata";
     private static final String DESKTOP_USER_AGENT =
@@ -267,8 +269,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "sheet.setAttribute('role','dialog');"
             + "sheet.setAttribute('aria-label','Media on this page');"
             + "sheet.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;max-height:62vh;"
-            + "overflow:auto;background:#121212;color:#fafafa;border:1px solid #27272a;border-radius:20px;"
-            + "padding:8px 10px 14px;transform:translateY(130%);transition:transform .22s ease;"
+            + "overflow:auto;background:#121212;color:#fafafa;border:1px solid #27272a;border-radius:16px;"
+            + "padding:12px 14px 16px;transform:translateY(130%);transition:transform .22s ease;"
             + "z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;"
             + "box-shadow:0 18px 50px rgba(0,0,0,.55);box-sizing:border-box';"
             + "var head=d.createElement('div');"
@@ -301,6 +303,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "if(k==='dash')return 'DASH';"
             + "if(k==='audio')return 'AUDIO';"
             + "return 'VIDEO';}"
+            + "function pageTitle(){var t=(d.title||'').trim();"
+            + "if(t)return t;try{return new URL(location.href).hostname;}catch(e){return location.href;}}"
+            /* The player knows the real frame size; the URL usually does not. */
+            + "function resOf(u){"
+            + "var v=d.querySelectorAll('video');"
+            + "for(var i=0;i<v.length;i++){var el=v[i];if(!el.videoWidth)continue;"
+            + "var s=el.currentSrc||el.src||'';"
+            + "if(!u||s===u||el.getAttribute('src')===u)return el.videoWidth+'\\u00d7'+el.videoHeight;}"
+            + "return '';}"
             + "function posterFor(u){"
             + "var v=d.querySelectorAll('video');"
             + "for(var i=0;i<v.length;i++){var s=v[i].currentSrc||v[i].src||'';"
@@ -325,11 +336,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "var meta=d.createElement('div');"
             + "meta.style.cssText='flex:1 1 auto;min-width:0';"
             + "var isPage=item.kind==='page';"
+            + "var res=resOf(isPage?'':item.url);"
             + "var name=d.createElement('div');"
-            + "name.textContent=isPage?'This page':nameOf(item.url);"
-            + "name.style.cssText='font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';"
+            + "name.textContent=isPage?pageTitle():nameOf(item.url);"
+            + "name.style.cssText='font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';"
             + "var sub=d.createElement('div');"
-            + "sub.textContent=isPage?'Full page \\u00b7 yt-dlp':qualityOf(item.url,item.kind)+' \\u00b7 '+(item.kind==='audio'?'Audio':'Video');"
+            + "var q=res||(isPage?'Full page':qualityOf(item.url,item.kind));"
+            + "sub.textContent=isPage?q+' \\u00b7 yt-dlp':q+' \\u00b7 '+(item.kind==='audio'?'Audio':'Video');"
             + "sub.style.cssText='font-size:11px;color:#a1a1aa;margin-top:2px';"
             + "meta.appendChild(name);meta.appendChild(sub);"
             + "var acts=d.createElement('div');"
@@ -356,7 +369,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "yt.style.cssText='border:1px solid #3f3f46;border-radius:9px;background:transparent;"
             + "color:#fafafa;font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer;white-space:nowrap';"
             + "yt.onclick=function(e){e.stopPropagation();closeSheet();"
-            + "try{window.FourKeeperHost.downloadYtdlp(item.url,tk);}catch(err){}};"
+            + "try{window.FourKeeperHost.downloadYtdlp(item.url,tk,isPage?pageTitle():'');}catch(err){}};"
             + "acts.appendChild(yt);}"
             + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
             + "return r;}"
@@ -383,10 +396,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "var low=u.toLowerCase();"
             + "if(low.indexOf('thumb')>=0||low.indexOf('preview')>=0||low.indexOf('sprite')>=0"
             + "||low.indexOf('poster')>=0)continue;"
+            /* Ad creative is media too: a pre-roll or banner video is never the
+             * stream the user opened the page for. */
+            + "if(/doubleclick|googlesyndication|\\/ads?\\/|\\/banners?\\/|pagead/.test(low))continue;"
             + "if(it.kind==='hls'){if(hls)continue;hls=1;}"
             + "seen[u]=1;out.push(it);}"
             + "return out;}"
             + "window.__4kSniffer={update:function(next){items=clean(next);render();}};"
+            /* YouTube, X and friends swap the document without a page load, so
+             * onPageFinished never fires again. Keep the button attached and
+             * redraw the page row when only the URL changed. */
+            + "var lastHref=location.href;"
+            + "setInterval(function(){try{"
+            + "if(!host.isConnected&&(d.body||d.documentElement)){(d.body||d.documentElement).appendChild(host);}"
+            + "if(location.href!==lastHref){lastHref=location.href;render();setTimeout(render,2000);}"
+            + "}catch(e){}},1000);"
             + "try{if(!window.matchMedia||!window.matchMedia('(prefers-reduced-motion: reduce)').matches){"
             + "fab.animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}],"
             + "{duration:2400,iterations:Infinity,easing:'ease-in-out'});}}catch(e){}"
@@ -656,6 +680,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
     private volatile boolean dohEnabled = false;
     /** Which DoH endpoint {@link #getDohClient()} asks; see {@link #dohUrl}. */
     private volatile String dohProvider = "cloudflare";
+    /** Used when the provider is "custom"; anything but https:// is ignored. */
+    private volatile String dohCustomUrl = "";
     private final OkHttpClient proxyClient = new OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -740,6 +766,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         doNotTrack = prefs.getBoolean("doNotTrack", true);
         dohEnabled = prefs.getBoolean("dohEnabled", false);
         dohProvider = prefs.getString("dohProvider", "cloudflare");
+        dohCustomUrl = prefs.getString("dohCustomUrl", "");
         fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", true);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
@@ -850,6 +877,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("doNotTrack", doNotTrack)
             .putBoolean("dohEnabled", dohEnabled)
             .putString("dohProvider", dohProvider)
+            .putString("dohCustomUrl", dohCustomUrl)
             .putInt("speedLimit", speedLimitKb)
             .putBoolean("fingerprintBlockEnabled", fingerprintBlockEnabled)
             .putBoolean("desktopMode", desktopMode)
@@ -1128,13 +1156,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
          * their own player, so nothing usable is sniffed from the page: yt-dlp
          * extracts the real formats and merges them. */
         @JavascriptInterface
-        public void downloadYtdlp(String url, String token) {
+        public void downloadYtdlp(String url, String token, String titleText) {
             if (!secretToken.equals(token)) return;
             if (url == null || url.isEmpty()) return;
             Activity activity = getActivity();
             if (activity == null) return;
             final String target = url;
-            activity.runOnUiThread(() -> startYtdlpDownload(target, tabId));
+            final String title = titleText == null ? "" : titleText.trim();
+            activity.runOnUiThread(() -> startYtdlpDownload(target, tabId, title));
         }
 
         @JavascriptInterface
@@ -1306,6 +1335,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
         }
     }
 
+    /* Pre-rolls and banner videos come from hosts that are often not on any
+     * blocklist, and they are still never the stream the user asked for. */
+    private static final Pattern AD_MEDIA_PATTERN = Pattern.compile(
+        "(?:doubleclick|googlesyndication|googleadservices|adservice|/ads?/|/banners?/|pagead|/advert)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static boolean isAdMedia(String url) {
+        try {
+            return AD_MEDIA_PATTERN.matcher(url).find();
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
     private boolean isAdHost(String host) {
         AdBlockManager manager = adBlockManager;
         return manager != null && manager.isBlocked(host);
@@ -1425,7 +1469,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
     /* One endpoint per provider; the selector in Browser settings only picks
      * which of these OkHttp asks. Unknown values fall back to Cloudflare. */
-    private static String dohUrl(String provider) {
+    private static String dohUrl(String provider, String custom) {
+        if ("custom".equals(provider)) {
+            String url = custom == null ? "" : custom.trim();
+            /* A plain-http resolver would send every lookup in the clear. */
+            if (url.startsWith("https://")) return url;
+        }
         if ("google".equals(provider)) return "https://dns.google/dns-query";
         if ("quad9".equals(provider)) return "https://dns.quad9.net/dns-query";
         if ("adguard".equals(provider)) return "https://dns.adguard-dns.com/dns-query";
@@ -1441,7 +1490,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (client == null) {
             DnsOverHttps dns = new DnsOverHttps.Builder()
                 .client(new OkHttpClient())
-                .url(HttpUrl.get(dohUrl(dohProvider)))
+                .url(HttpUrl.get(dohUrl(dohProvider, dohCustomUrl)))
                 .resolvePrivateAddresses(true)
                 .includeIPv6(false)
                 .build();
@@ -1809,6 +1858,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
         Uri uri = Uri.parse(url);
         String scheme = uri.getScheme();
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
+        /* Ads are sniffed too when blocking is off or the host is not listed. */
+        if (isAdMedia(url)) return;
         String resolved = kind == null || kind.isEmpty() ? mediaKind(url) : kind;
         if (resolved == null) return;
         if ("hls".equals(resolved) && isPreviewMedia(url)) return;
@@ -2408,8 +2459,10 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("dnsOverHttps")) dohEnabled = data.optBoolean("dnsOverHttps", false);
         if (data.has("dohProvider")) {
             String provider = data.optString("dohProvider", "cloudflare");
-            if (!provider.equals(dohProvider)) {
+            String custom = data.optString("dohCustomUrl", dohCustomUrl).trim();
+            if (!provider.equals(dohProvider) || !custom.equals(dohCustomUrl)) {
                 dohProvider = provider;
+                dohCustomUrl = custom;
                 /* The cached client is pinned to the old endpoint. */
                 dohClient = null;
             }
@@ -3285,7 +3338,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
      * build their media inside their own player, so there is no stream URL to
      * sniff: yt-dlp picks the best video+audio pair and ffmpeg merges them.
      */
-    private void startYtdlpDownload(String url, int sourceTabId) {
+    private void startYtdlpDownload(String url, int sourceTabId, String title) {
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             toast("Only http(s) pages can be downloaded.");
             return;
@@ -3304,7 +3357,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
         String host = Uri.parse(url).getHost();
         if (host == null || host.isEmpty()) host = "Video";
         if (host.startsWith("www.")) host = host.substring(4);
-        final String label = host + " video";
+        /* The page title is what the user recognises in the list; the host is
+         * only the fallback when the page had none. */
+        final String label = title == null || title.isEmpty() ? host + " video" : title;
         final File folder = dir;
         final long id = System.currentTimeMillis() * 1000L + (long) (Math.random() * 1000);
         /* yt-dlp names the file after the video title, which is only known once
@@ -3365,9 +3420,13 @@ public class EmbeddedWebViewPlugin extends Plugin {
                         return Unit.INSTANCE;
                     }
                 });
+                /* A toast vanishes, and yt-dlp explains a failure on stderr;
+                 * both streams go to logcat so a silent failure is diagnosable. */
+                Log.d(TAG, "yt-dlp " + url + "\n" + response.getOut() + "\n" + response.getError());
                 output = printedDownloadFile(response.getOut());
                 if (output == null) output = newestDownloadFile(folder, startedAt);
             } catch (Exception error) {
+                Log.e(TAG, "yt-dlp failed: " + url, error);
                 cleanYtdlpTemp(folder);
                 String detail = error.getMessage() == null ? "unknown error" : error.getMessage();
                 updateCustomRecord(id, "failed", 0, 0, null);

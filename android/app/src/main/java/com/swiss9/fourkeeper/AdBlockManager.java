@@ -75,12 +75,19 @@ public class AdBlockManager {
         this.hostsFile = new File(directory, FILE_NAME);
     }
 
-    /** Reads the bundled list and the cached hosts once; safe on every app boot. */
+    /**
+     * Reads the cached hosts once; safe on every app boot. The bundled list is
+     * only used when no cache exists: unioning it over the cache made every
+     * filter-list toggle look ignored, because the shipped domains stayed
+     * blocked whatever the user enabled.
+     */
     public synchronized void loadListsFromDisk() {
         if (loaded) return;
         loaded = true;
-        loadBundledList();
-        if (!hostsFile.exists()) return;
+        if (!hostsFile.exists()) {
+            loadBundledList();
+            return;
+        }
         try (BufferedReader reader = new BufferedReader(
             new InputStreamReader(new FileInputStream(hostsFile), "UTF-8"))) {
             String line;
@@ -90,6 +97,7 @@ public class AdBlockManager {
             }
         } catch (Exception ignored) {
         }
+        if (blockedHosts.isEmpty()) loadBundledList();
     }
 
     /* The cached hosts file only exists after the first successful update, so
@@ -144,7 +152,19 @@ public class AdBlockManager {
                 if (url != null && !url.trim().isEmpty()) targets.add(url.trim());
             }
         }
-        if (targets.isEmpty()) targets.addAll(DEFAULT_LIST_URLS);
+        if (targets.isEmpty()) {
+            /* No list enabled: keep the list shipped in the APK rather than
+             * downloading lists the user did not select. */
+            synchronized (this) {
+                blockedHosts.clear();
+                enabledListUrls.clear();
+                failedListUrls.clear();
+                loadBundledList();
+            }
+            /* No cache, so the next boot takes the bundled branch too. */
+            hostsFile.delete();
+            return size();
+        }
         synchronized (this) {
             enabledListUrls.clear();
             enabledListUrls.addAll(targets);

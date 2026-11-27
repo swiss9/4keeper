@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.IBinder;
 
 import androidx.core.app.NotificationCompat;
+import androidx.media.app.NotificationCompat.MediaStyle;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Player;
@@ -182,7 +183,22 @@ public class MediaPlaybackService extends Service {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPlayback())
             .setOngoing(true)
             .setSilent(true)
+            .setStyle(mediaStyle())
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build();
+    }
+
+    /* MediaStyle is what makes Android treat the foreground service as a media
+     * session: without it the notification is not a media control and playback
+     * is torn down as soon as the app leaves the foreground. */
+    private MediaStyle mediaStyle() {
+        MediaStyle style = new MediaStyle().setShowActionsInCompactView(0);
+        try {
+            if (session != null) style.setMediaSession(session.getSessionCompatToken());
+        } catch (Exception ignored) {
+            /* No token only costs the lock-screen controls. */
+        }
+        return style;
     }
 
     /* Brings the app forward rather than opening a player with no URL. */

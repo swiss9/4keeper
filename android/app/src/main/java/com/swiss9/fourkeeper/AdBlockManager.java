@@ -128,7 +128,10 @@ public class AdBlockManager {
     }
 
     /** True for the host and any parent domain listed in a hosts file. */
-    public synchronized boolean isBlocked(String host) {        if (host == null) return false;
+    public synchronized boolean isBlocked(String host) {
+        if (host == null) return false;
+        /* ads.doubleclick.net is blocked by an entry for doubleclick.net: walk
+         * the labels from the left so every parent is tested. */
         String lower = host.toLowerCase(Locale.US);
         int start = 0;
         while (start < lower.length()) {

@@ -3007,8 +3007,22 @@ function editableShortcuts() {
   return settings.quickAccess;
 }
 
+/* The Shortcuts tab is a page of its own: with nothing pinned it says so
+ * instead of borrowing the download queue's "No active downloads". */
+function shortcutsEmptyMarkup() {
+  return `
+    <div class="dl-empty qa-empty">
+      <div class="dl-empty-body">
+        <span class="dl-empty-icon" aria-hidden="true">${svgIcon('pin', 'icon')}</span>
+        <div class="dl-empty-title">No shortcuts added yet</div>
+        <div class="dl-empty-text">Tap Add to pin a site you open every day.</div>
+      </div>
+    </div>`;
+}
+
 function renderQuickAccess() {
-  const tiles = shortcutItems()
+  const items = shortcutItems();
+  const tiles = items
     .map((item, index) => {
       const label = String(item.label || hostOf(item.url));
       return `
@@ -3031,7 +3045,10 @@ function renderQuickAccess() {
       </button>`;
   [dom.dashboardQuickAccess, dom.newTabQuickAccess].forEach((node) => {
     if (!node) return;
-    node.innerHTML = html;
+    /* Only the dashboard's Shortcuts tab needs the empty state; the new tab
+     * page keeps just the Add tile. */
+    const empty = node === dom.dashboardQuickAccess && !items.length ? shortcutsEmptyMarkup() : '';
+    node.innerHTML = empty + html;
     /* No favicon (offline, unknown host) falls back to the letter. */
     node.querySelectorAll('img.qa-fav').forEach((img) => {
       img.addEventListener('error', () => img.remove());
@@ -6359,6 +6376,9 @@ async function boot() {
   updateMenuCounts();
   migrateShortcuts();
   renderQuickAccess();
+  /* The Shortcuts tab is the launch filter, so the queue must start hidden:
+   * its static "No active downloads" markup belongs to the other tabs. */
+  syncDashboardView();
 
   await mountBrowser(true);
   nativeVisibleState = false;

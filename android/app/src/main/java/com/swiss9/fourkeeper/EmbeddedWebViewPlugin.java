@@ -369,13 +369,15 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "yt.style.cssText='border:1px solid #3f3f46;border-radius:9px;background:transparent;"
             + "color:#fafafa;font:700 11px system-ui,sans-serif;padding:7px 10px;cursor:pointer;white-space:nowrap';"
             + "yt.onclick=function(e){e.stopPropagation();closeSheet();"
-            + "try{window.FourKeeperHost.downloadYtdlp(item.url,tk,isPage?pageTitle():'');}catch(err){}};"
+            + "try{window.FourKeeperHost.downloadYtdlp(item.url,tk,pageTitle());}catch(err){}};"
             + "acts.appendChild(yt);}"
             + "r.appendChild(thumb);r.appendChild(meta);r.appendChild(acts);"
             + "return r;}"
             + "function render(){"
             + "clear(list);"
-            + "var page=isYtdlp(location.href);"
+            /* A page with a <video> in it is worth offering even when nothing
+             * was sniffed: yt-dlp can still take the page. */
+            + "var page=isYtdlp(location.href)||!!d.querySelector('video');"
             + "if(page)list.appendChild(row({url:location.href,kind:'page'}));"
             + "if(!items.length){if(!page){fab.style.display='none';closeSheet();return;}"
             + "badge.textContent='1';fab.style.display='flex';return;}"
@@ -410,6 +412,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "setInterval(function(){try{"
             + "if(!host.isConnected&&(d.body||d.documentElement)){(d.body||d.documentElement).appendChild(host);}"
             + "if(location.href!==lastHref){lastHref=location.href;render();setTimeout(render,2000);}"
+            /* A player that appears after the first render (SPA, lazy iframe)
+             * still gets the button. */
+            + "else if(fab.style.display==='none'&&d.querySelector('video')){render();}"
             + "}catch(e){}},1000);"
             + "try{if(!window.matchMedia||!window.matchMedia('(prefers-reduced-motion: reduce)').matches){"
             + "fab.animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}],"
@@ -782,9 +787,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
         cookiesMode = prefs.getString("cookiesMode", "all");
 
         adBlockManager = new AdBlockManager(getContext(), getContext().getFilesDir());
-        /* The hosts cache can be several megabytes: never read it on the main
-         * thread, the first page would wait for it. */
-        getBridge().execute(() -> adBlockManager.loadListsFromDisk());
+        /* Parsed before any page exists: the WebView starts asking for
+         * sub-resources as soon as the first tab loads, and a list that is
+         * still being read would leave the first page unblocked. One pass over
+         * the bundled ~81k hosts costs a fraction of a second at boot. */
+        adBlockManager.loadListsFromDisk();
 
         downloadExecutor = Executors.newFixedThreadPool(4);
         probeExecutor = Executors.newSingleThreadExecutor();
@@ -3325,6 +3332,17 @@ public class EmbeddedWebViewPlugin extends Plugin {
         transformer.start(composition, target.getAbsolutePath());
     }
 
+    /* Sites whose media only exists inside their own player; the same list the
+     * sniffer offers as a page row. */
+    private static final Pattern YTDLP_HOST_PATTERN = Pattern.compile(
+        "(^|\\.)(youtube\\.com|youtu\\.be|twitter\\.com|x\\.com|instagram\\.com|tiktok\\.com)$"
+    );
+
+    private static boolean isYtdlpPage(String url) {
+        String host = url == null ? null : Uri.parse(url).getHost();
+        return host != null && YTDLP_HOST_PATTERN.matcher(host.toLowerCase(Locale.US)).find();
+    }
+
     /** Unpacks the bundled python and ffmpeg once; safe from any thread. */
     private synchronized void ensureYtdlp() throws Exception {
         if (ytdlpReady) return;
@@ -3395,11 +3413,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
 
         executor.execute(() -> {
             File output;
+            /* yt-dlp writes into a folder of its own, so a failed run is deleted
+             * whole instead of guessing which file in the download folder it
+             * left behind. */
+            File job = new File(folder, ".ytdlp-" + id);
+            if (!job.isDirectory() && !job.mkdirs()) {
+                updateCustomRecord(id, "failed", 0, 0, null);
+                notifyDownloadProgress(id, 0, 0, "failed");
+                toast("Could not create the download folder.");
+                return;
+            }
             try {
                 ensureYtdlp();
                 YoutubeDLRequest request = new YoutubeDLRequest(url);
                 request.addOption("-f", "bestvideo+bestaudio/best");
-                request.addOption("-o", new File(folder, "%(title)s.%(ext)s").getAbsolutePath());
+                request.addOption("-o", new File(job, "%(title)s.%(ext)s").getAbsolutePath());
                 /* One tap on a watch page must not queue its whole playlist. */
                 request.addOption("--no-playlist");
                 /* --print implies --quiet and --simulate: --no-simulate keeps the
@@ -3424,11 +3452,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
                  * both streams go to logcat so a silent failure is diagnosable. */
                 Log.d(TAG, "yt-dlp exit " + response.getExitCode() + " " + url
                     + "\n" + response.getOut() + "\n" + response.getErr());
+                /* A non-zero exit means nothing usable was written: whatever the
+                 * run left is an error page or a broken fragment, never the
+                 * video, so it is deleted instead of being listed as a download. */
+                if (response.getExitCode() != 0) {
+                    deleteTree(job);
+                    updateCustomRecord(id, "failed", 0, 0, null);
+                    notifyDownloadProgress(id, 0, 0, "failed");
+                    toast("yt-dlp failed: " + firstLine(response.getErr()));
+                    return;
+                }
                 output = printedDownloadFile(response.getOut());
-                if (output == null) output = newestDownloadFile(folder, startedAt);
+                if (output == null) output = newestDownloadFile(job, startedAt);
             } catch (Exception error) {
                 Log.e(TAG, "yt-dlp failed: " + url, error);
-                cleanYtdlpTemp(folder);
+                deleteTree(job);
                 String detail = error.getMessage() == null ? "unknown error" : error.getMessage();
                 updateCustomRecord(id, "failed", 0, 0, null);
                 notifyDownloadProgress(id, 0, 0, "failed");
@@ -3436,11 +3474,18 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 return;
             }
             if (output == null) {
-                cleanYtdlpTemp(folder);
+                deleteTree(job);
                 updateCustomRecord(id, "failed", 0, 0, null);
                 notifyDownloadProgress(id, 0, 0, "failed");
                 toast("yt-dlp finished but wrote no file.");
                 return;
+            }
+            /* The finished file belongs in the download folder, not in the
+             * hidden work folder; a failed rename keeps it where it is. */
+            File moved = uniqueDownloadFile(folder, output.getName());
+            if (output.renameTo(moved)) {
+                deleteTree(job);
+                output = moved;
             }
             long size = output.length();
             updateCustomRecord(id, "successful", size, size, output);
@@ -3466,14 +3511,27 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     /* A failed or interrupted run leaves .part fragments and the .ytdl resume
-     * marker behind; nothing in this app can use them again. */
-    private void cleanYtdlpTemp(File dir) {
+     * marker behind; the job folder is deleted whole so nothing of it remains. */
+    private static void deleteTree(File dir) {
         File[] files = dir.listFiles();
-        if (files == null) return;
-        for (File file : files) {
-            String name = file.getName();
-            if (name.endsWith(".ytdl") || name.contains(".part")) file.delete();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) deleteTree(file);
+                else file.delete();
+            }
         }
+        dir.delete();
+    }
+
+    /* yt-dlp explains a failure on stderr; the first line is the message. */
+    private static String firstLine(String text) {
+        if (text != null) {
+            for (String line : text.split("\n")) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty()) return trimmed;
+            }
+        }
+        return "unknown error";
     }
 
     /* Fallback when the printed path is missing: the newest file in the folder
@@ -3509,6 +3567,12 @@ public class EmbeddedWebViewPlugin extends Plugin {
      * 8 or 16 ranged connections) is actually used.
      */
     private boolean startNativeDownload(String url, String filename, String mime, String userAgent, int sourceTabId) {
+        /* A watch page has no stream of its own, so the plain downloader would
+         * save the HTML player as a video. yt-dlp extracts the real file. */
+        if (isYtdlpPage(url)) {
+            startYtdlpDownload(url, sourceTabId, filename);
+            return true;
+        }
         File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if (dir == null) dir = new File(getContext().getFilesDir(), "Download");
         if (!dir.exists() && !dir.mkdirs()) {
@@ -3806,7 +3870,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
     }
 
     private void toast(String message) {
-        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show());
+        /* Downloads finish and fail in the background too: a toast without an
+         * activity must not throw on the worker thread. */
+        Activity activity = getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show());
     }
 
     private static String downloadStatus(int status) {

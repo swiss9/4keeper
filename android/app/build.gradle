@@ -54,6 +54,9 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-dash:1.4.1"
     implementation "androidx.media3:media3-ui:1.4.1"
     implementation "androidx.media3:media3-session:1.4.1"
+    /* MediaStyle for the playback notification; media3-session exposes the
+     * compat token, so the version is pinned here rather than left implicit. */
+    implementation "androidx.media:media:1.7.0"
     implementation "androidx.media3:media3-transformer:1.4.1"
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0'

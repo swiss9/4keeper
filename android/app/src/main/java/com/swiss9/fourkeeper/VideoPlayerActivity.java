@@ -206,6 +206,14 @@ public class VideoPlayerActivity extends Activity {
         }
     }
 
+    /* Back closes the player window only. The service was started with
+     * startService(), so it outlives this activity and the audio keeps going
+     * while the tab the user came from is already underneath. */
+    @Override
+    public void onBackPressed() {
+        finish();
+    }
+
     @Override
     protected void onDestroy() {
         /* Detach the surface but never release the player here: the service
@@ -224,11 +232,9 @@ public class VideoPlayerActivity extends Activity {
             }
             bound = false;
         }
-        /* Closed by the user: stop. Destroyed by the system while the app went
-         * to the background: leave the service playing. */
-        if (isFinishing()) {
-            MediaPlaybackService.stop(this);
-        }
+        /* Unbind only: the service was started, not just bound, so it survives
+         * this activity and keeps the player (and the audio) alive. Stopping it
+         * is the notification's Stop action or the end of the media. */
         super.onDestroy();
     }
 }

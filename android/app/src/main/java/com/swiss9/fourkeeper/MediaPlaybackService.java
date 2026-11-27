@@ -90,14 +90,6 @@ public class MediaPlaybackService extends Service {
         }
     }
 
-    /** Drops the session, the player and the notification when playback is over. */
-    public static void stop(Context context) {
-        try {
-            context.stopService(new Intent(context, MediaPlaybackService.class));
-        } catch (Exception ignored) {
-        }
-    }
-
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {

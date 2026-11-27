@@ -34,10 +34,13 @@ public class VideoPlayerActivity extends Activity {
 
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_KIND = "kind";
+    /** Set by the sniffer's Play button: open straight into the floating window. */
+    public static final String EXTRA_PIP = "pip";
 
     private ExoPlayer player;
     private PlayerView playerView;
     private FrameLayout root;
+    private boolean pipOnStart;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,6 +63,7 @@ public class VideoPlayerActivity extends Activity {
             finish();
             return;
         }
+        pipOnStart = intent.getBooleanExtra(EXTRA_PIP, false);
 
         player = new ExoPlayer.Builder(this).build();
         player.setAudioAttributes(
@@ -83,6 +87,24 @@ public class VideoPlayerActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             updatePipParams(false);
         }
+        /* Keeps the process alive and the session published once the user
+         * leaves the app, so the audio does not stop with the window. */
+        MediaPlaybackService.start(this, player);
+    }
+
+    /* Play in the sniffer asks for the floating window, so the player enters PiP
+     * as soon as it is resumed: the page stays underneath and the video floats
+     * over it. Tapping the window expands it to full screen. */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!pipOnStart) return;
+        pipOnStart = false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            enterPictureInPictureMode(buildPipParams(false));
+        } catch (Exception ignored) {
+        }
     }
 
     private void showError() {
@@ -105,14 +127,18 @@ public class VideoPlayerActivity extends Activity {
     private void updatePipParams(boolean autoEnter) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         try {
-            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
-            builder.setAspectRatio(pipRatio());
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setAutoEnterEnabled(autoEnter);
-            }
-            setPictureInPictureParams(builder.build());
+            setPictureInPictureParams(buildPipParams(autoEnter));
         } catch (Exception ignored) {
         }
+    }
+
+    private PictureInPictureParams buildPipParams(boolean autoEnter) {
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+        builder.setAspectRatio(pipRatio());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter);
+        }
+        return builder.build();
     }
 
     private Rational pipRatio() {
@@ -157,6 +183,7 @@ public class VideoPlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        MediaPlaybackService.stop(this);
         if (player != null) {
             player.release();
             player = null;

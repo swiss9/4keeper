@@ -88,8 +88,9 @@ const DEFAULT_SETTINGS = {
   adblockCustomLists: [],
   fingerprintBlock: true,
   doNotTrack: true,
-  /* Sends WebView traffic through OkHttp with Cloudflare's DoH resolver. */
+  /* Sends WebView traffic through OkHttp with the selected DoH resolver. */
   dnsOverHttps: false,
+  dohProvider: 'cloudflare',
   safeBrowsing: true,
   cookies: 'all',
   javaScript: true,
@@ -1581,6 +1582,7 @@ function pushNativeSettings(reload) {
     isFingerprintBlockEnabled: !!settings.fingerprintBlock,
     doNotTrack: !!settings.doNotTrack,
     dnsOverHttps: !!settings.dnsOverHttps,
+    dohProvider: settings.dohProvider || 'cloudflare',
     speedLimit: Number(settings.speedLimit) || 0,
     connectionsPerFile: Number(settings.connectionsPerFile) || 1,
     zoomControls: !!settings.zoomControls,
@@ -1613,6 +1615,7 @@ const NATIVE_SETTING_KEYS = [
   'fingerprintBlock',
   'doNotTrack',
   'dnsOverHttps',
+  'dohProvider',
   'speedLimit',
   'connectionsPerFile',
   'zoomControls',
@@ -4675,6 +4678,18 @@ function connectionsLabel() {
   return value + (value === 1 ? ' connection' : ' connections');
 }
 
+const DOH_PROVIDERS = [
+  { value: 'cloudflare', label: 'Cloudflare', desc: '1.1.1.1 — fastest' },
+  { value: 'google', label: 'Google', desc: '8.8.8.8' },
+  { value: 'quad9', label: 'Quad9', desc: '9.9.9.9 — blocks malware domains' },
+  { value: 'adguard', label: 'AdGuard', desc: '94.140.14.14 — blocks ads and trackers' }
+];
+
+function dohProviderLabel() {
+  const found = DOH_PROVIDERS.find((item) => item.value === settings.dohProvider);
+  return found ? found.label : 'Cloudflare';
+}
+
 /* Two separate settings trees:
  *  - 'app'     → Downloader settings (folder, speed, parallel downloads, theme)
  *  - 'browser' → Browser settings (search engine, desktop mode, JavaScript, data)
@@ -4819,7 +4834,8 @@ function settingsPagePrivacy() {
       ${settingRowToggle('fingerprintBlock', 'Fingerprint Protection', 'Spoof device details and canvas output')}
       ${settingRowToggle('trackingProtection', 'Tracking protection', 'Block known tracking hosts')}
       ${settingRowToggle('doNotTrack', 'Do Not Track', 'Send DNT and Global Privacy Control headers')}
-      ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups through Cloudflare')}
+      ${settingRowToggle('dnsOverHttps', 'DNS over HTTPS', 'Encrypt DNS lookups instead of using the system resolver')}
+      ${settingRowButton('shield', 'DNS provider', 'Resolver used while DoH is on', dohProviderLabel(), 'dnsProvider')}
       ${settingRowToggle('safeBrowsing', 'Safe Browsing', 'Warn about dangerous sites')}
     `) +
     settingSection('AdBlock Filter Lists', `
@@ -5027,6 +5043,9 @@ function handleSettingsAction(action) {
         { value: 'comfortable', label: 'Comfortable', desc: 'More breathing room' },
         { value: 'compact', label: 'Compact', desc: 'More rows on screen' }
       ], settings.density, (value) => updateSetting({ density: value }, { rerender: true }));
+      break;
+    case 'dnsProvider':
+      openChoice('DNS provider', DOH_PROVIDERS, settings.dohProvider || 'cloudflare', (value) => updateSetting({ dohProvider: value }, { rerender: true, toastMessage: 'DNS provider updated' }));
       break;
     case 'engine':
       openChoice('Search engine', Object.entries(ENGINES).map(([value, item]) => ({

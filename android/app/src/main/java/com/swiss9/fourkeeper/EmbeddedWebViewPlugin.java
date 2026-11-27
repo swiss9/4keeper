@@ -334,7 +334,21 @@ public class EmbeddedWebViewPlugin extends Plugin {
             + "fab.onclick=function(){openSheet();};"
             + "scrim.onclick=closeSheet;"
             + "close.onclick=closeSheet;"
-            + "window.__4kSniffer={update:function(next){items=Array.isArray(next)?next:[];render();}};"
+            /* The sheet only ever shows streams: thumbnails, hover previews and
+             * sprite sheets are dropped, and a player's variant playlists are
+             * reduced to the one HLS entry the page asked for first. */
+            + "function clean(next){"
+            + "var seen={},out=[],hls=0;"
+            + "if(!Array.isArray(next))return out;"
+            + "for(var i=0;i<next.length;i++){var it=next[i];if(!it||!it.url)continue;"
+            + "var u=String(it.url);if(seen[u])continue;"
+            + "var low=u.toLowerCase();"
+            + "if(low.indexOf('thumb')>=0||low.indexOf('preview')>=0||low.indexOf('sprite')>=0"
+            + "||low.indexOf('poster')>=0)continue;"
+            + "if(it.kind==='hls'){if(hls)continue;hls=1;}"
+            + "seen[u]=1;out.push(it);}"
+            + "return out;}"
+            + "window.__4kSniffer={update:function(next){items=clean(next);render();}};"
             + "try{if(!window.matchMedia||!window.matchMedia('(prefers-reduced-motion: reduce)').matches){"
             + "fab.animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}],"
             + "{duration:2400,iterations:Infinity,easing:'ease-in-out'});}}catch(e){}"
@@ -602,6 +616,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
     /* DoH only covers the requests OkHttp proxies; whatever stays native keeps
      * the WebView's own system resolver. */
     private volatile boolean dohEnabled = false;
+    /** Which DoH endpoint {@link #getDohClient()} asks; see {@link #dohUrl}. */
+    private volatile String dohProvider = "cloudflare";
     private final OkHttpClient proxyClient = new OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -681,6 +697,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         adBlockEnabled = prefs.getBoolean("adBlockEnabled", true);
         doNotTrack = prefs.getBoolean("doNotTrack", true);
         dohEnabled = prefs.getBoolean("dohEnabled", false);
+        dohProvider = prefs.getString("dohProvider", "cloudflare");
         fingerprintBlockEnabled = prefs.getBoolean("fingerprintBlockEnabled", true);
         desktopMode = prefs.getBoolean("desktopMode", false);
         pinchZoomEnabled = prefs.getBoolean("pinchZoomEnabled", true);
@@ -695,7 +712,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         textZoom = prefs.getInt("textZoom", 100);
         cookiesMode = prefs.getString("cookiesMode", "all");
 
-        adBlockManager = new AdBlockManager(getContext().getFilesDir());
+        adBlockManager = new AdBlockManager(getContext(), getContext().getFilesDir());
         /* The hosts cache can be several megabytes: never read it on the main
          * thread, the first page would wait for it. */
         getBridge().execute(() -> adBlockManager.loadListsFromDisk());
@@ -781,6 +798,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
             .putBoolean("adBlockEnabled", adBlockEnabled)
             .putBoolean("doNotTrack", doNotTrack)
             .putBoolean("dohEnabled", dohEnabled)
+            .putString("dohProvider", dohProvider)
             .putInt("speedLimit", speedLimitKb)
             .putBoolean("fingerprintBlockEnabled", fingerprintBlockEnabled)
             .putBoolean("desktopMode", desktopMode)
@@ -1055,6 +1073,8 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 Intent intent = new Intent(activity, VideoPlayerActivity.class);
                 intent.putExtra(VideoPlayerActivity.EXTRA_URL, target);
                 intent.putExtra(VideoPlayerActivity.EXTRA_KIND, resolved);
+                /* Play floats the video over the page instead of replacing it. */
+                intent.putExtra(VideoPlayerActivity.EXTRA_PIP, true);
                 try {
                     activity.startActivity(intent);
                 } catch (Exception ignored) {
@@ -1300,6 +1320,11 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
             ResponseBody body = response.body();
             MediaType type = body.contentType();
+            /* A main-frame document that dies halfway is replaced by the WebView's
+             * own error page and the navigation is lost. Reading it fully first
+             * turns any failure into a clean null below, which hands the
+             * navigation to the WebView's native stack instead of an error page. */
+            byte[] document = request.isForMainFrame() ? body.bytes() : null;
             Map<String, String> headers = new LinkedHashMap<>();
             for (String name : response.headers().names()) {
                 String lower = name.toLowerCase(Locale.ROOT);
@@ -1313,19 +1338,36 @@ public class EmbeddedWebViewPlugin extends Plugin {
             }
             String mime = type == null ? null : type.type() + "/" + type.subtype();
             String charset = type == null || type.charset() == null ? null : type.charset().name();
-            return new WebResourceResponse(mime, charset, response.code(), response.message(), headers, body.byteStream());
+            InputStream stream = document == null
+                ? body.byteStream()
+                : new ByteArrayInputStream(document);
+            return new WebResourceResponse(mime, charset, response.code(), response.message(), headers, stream);
         } catch (Exception error) {
             return null;
         }
     }
 
-    /* Cloudflare's DoH endpoint resolves the names OkHttp connects to. */
+    /* One endpoint per provider; the selector in Browser settings only picks
+     * which of these OkHttp asks. Unknown values fall back to Cloudflare. */
+    private static String dohUrl(String provider) {
+        if ("google".equals(provider)) return "https://dns.google/dns-query";
+        if ("quad9".equals(provider)) return "https://dns.quad9.net/dns-query";
+        if ("adguard".equals(provider)) return "https://dns.adguard-dns.com/dns-query";
+        return "https://cloudflare-dns.com/dns-query";
+    }
+
+    /* The selected provider's DoH endpoint resolves the names OkHttp connects to.
+     * shortcut: IPv6 answers are dropped, because a network without a working
+     * IPv6 route made OkHttp spend a connect timeout per address before falling
+     * back; revisit if IPv6-only networks must work. */
     private OkHttpClient getDohClient() {
         OkHttpClient client = dohClient;
         if (client == null) {
             DnsOverHttps dns = new DnsOverHttps.Builder()
                 .client(new OkHttpClient())
-                .url(HttpUrl.get("https://cloudflare-dns.com/dns-query"))
+                .url(HttpUrl.get(dohUrl(dohProvider)))
+                .resolvePrivateAddresses(true)
+                .includeIPv6(false)
                 .build();
             client = proxyClient.newBuilder().dns(dns).build();
             dohClient = client;
@@ -1653,6 +1695,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
         return null;
     }
 
+    /* Thumbnails, hover previews and sprite sheets are HLS playlists too, and a
+     * page requests dozens of them. They are never the stream the user wants. */
+    private static boolean isPreviewMedia(String url) {
+        String lower = url.toLowerCase(Locale.US);
+        return lower.contains("thumb") || lower.contains("preview")
+            || lower.contains("sprite") || lower.contains("poster");
+    }
+
     private void detectMediaRequest(int tabId, WebResourceRequest request) {
         try {
             if (!snifferEnabled) return;
@@ -1685,6 +1735,7 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
         String resolved = kind == null || kind.isEmpty() ? mediaKind(url) : kind;
         if (resolved == null) return;
+        if ("hls".equals(resolved) && isPreviewMedia(url)) return;
         boolean added = false;
         synchronized (tabMedia) {
             LinkedHashSet<String> seen = reportedMedia.get(tabId);
@@ -1702,6 +1753,9 @@ public class EmbeddedWebViewPlugin extends Plugin {
                 tabMedia.put(tabId, items);
             }
             if (!items.containsKey(url)) {
+                /* One HLS entry per tab: a player asks for the master playlist and
+                 * then every variant, and only the first is the stream itself. */
+                if ("hls".equals(resolved) && items.containsValue("hls")) return;
                 items.put(url, resolved);
                 while (items.size() > MAX_MEDIA_ITEMS) {
                     String oldest = items.keySet().iterator().next();
@@ -2254,6 +2308,14 @@ public class EmbeddedWebViewPlugin extends Plugin {
         if (data.has("isFingerprintBlockEnabled")) fingerprintBlockEnabled = data.optBoolean("isFingerprintBlockEnabled", true);
         if (data.has("doNotTrack")) doNotTrack = data.optBoolean("doNotTrack", true);
         if (data.has("dnsOverHttps")) dohEnabled = data.optBoolean("dnsOverHttps", false);
+        if (data.has("dohProvider")) {
+            String provider = data.optString("dohProvider", "cloudflare");
+            if (!provider.equals(dohProvider)) {
+                dohProvider = provider;
+                /* The cached client is pinned to the old endpoint. */
+                dohClient = null;
+            }
+        }
         if (data.has("speedLimit")) {
             speedLimitKb = Math.max(0, data.optInt("speedLimit", 0));
             /* A cap changed while files are running applies to them too. */

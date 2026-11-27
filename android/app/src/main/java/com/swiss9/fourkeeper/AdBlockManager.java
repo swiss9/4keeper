@@ -1,5 +1,7 @@
 package com.swiss9.fourkeeper;
 
+import android.content.Context;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -29,6 +31,8 @@ import java.util.regex.Pattern;
 public class AdBlockManager {
 
     private static final String FILE_NAME = "adblock_hosts.txt";
+    /** Shipped in the APK, so the first launch blocks without any download. */
+    private static final String BUNDLED_LIST = "blocklist.txt";
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 20000;
     private static final String USER_AGENT = "Mozilla/5.0 (Linux; Android 14) 4Keeper/1.0";
@@ -59,23 +63,40 @@ public class AdBlockManager {
         }
     }
 
+    private final Context context;
     private final File hostsFile;
     private final HashSet<String> blockedHosts = new HashSet<>();
     private final List<String> enabledListUrls = new ArrayList<>();
     private final List<String> failedListUrls = new ArrayList<>();
     private boolean loaded = false;
 
-    public AdBlockManager(File directory) {
+    public AdBlockManager(Context context, File directory) {
+        this.context = context.getApplicationContext();
         this.hostsFile = new File(directory, FILE_NAME);
     }
 
-    /** Reads the cached hosts once; safe to call on every app boot. */
+    /** Reads the bundled list and the cached hosts once; safe on every app boot. */
     public synchronized void loadListsFromDisk() {
         if (loaded) return;
         loaded = true;
+        loadBundledList();
         if (!hostsFile.exists()) return;
         try (BufferedReader reader = new BufferedReader(
             new InputStreamReader(new FileInputStream(hostsFile), "UTF-8"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String host = normalize(line);
+                if (host != null) blockedHosts.add(host);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /* The cached hosts file only exists after the first successful update, so
+     * the bundled list is what makes blocking work offline on a fresh install. */
+    private void loadBundledList() {
+        try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(context.getAssets().open(BUNDLED_LIST), "UTF-8"))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 String host = normalize(line);
